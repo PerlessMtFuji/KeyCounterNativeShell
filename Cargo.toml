@@ -1,0 +1,104 @@
+[package]
+name = "keycounter-native"
+version = "0.1.0"
+description = "Privacy-first keystroke counter — native Win32/Direct2D shell"
+authors = ["KeyCounter contributors"]
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+repository = "https://github.com/perlessmtfuji/keycounternativeshell"
+
+# Single binary, no library — keeps the link unit small. The `windows`
+# subsystem flag is set per-target via build.rs to suppress the console
+# window on release builds while preserving stdout for `cargo run`.
+[[bin]]
+name = "keycounter"
+path = "src/main.rs"
+
+[build-dependencies]
+embed-resource = "2.4"
+winres = "0.1"
+
+[dependencies]
+# windows-rs: hand-picked feature set. Each feature pulls in only the
+# Win32 modules it needs, which keeps the type-stub compile cost — the
+# dominant build-time line item — manageable. Re-check this list when
+# touching new APIs; never enable the umbrella `Win32` feature.
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_System_Performance",
+    "Win32_System_SystemInformation",
+    "Win32_System_Power",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Controls",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Imaging",
+    "Win32_Graphics_Imaging_D2D",
+    "Win32_Storage_FileSystem",
+] }
+
+windows-core = "0.58"
+
+# SQLite with bundled C source — avoids the system sqlite dependency
+# entirely and lets the installer ship a single .exe. Pulled in with
+# minimal features (no async, no chrono, no serde — we serialize the
+# few rows we need by hand).
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Time / date math. `clock` feature gives `Utc::now()`, `serde` gives
+# the chrono::serde helpers used by the JSON exporter.
+chrono = { version = "0.4", features = ["serde", "clock"] }
+
+# Lock primitives. parking_lot's Mutex is ~3 instructions on the fast
+# path vs. std's syscall — matters for the storage-thread channel.
+parking_lot = "0.12"
+
+# JSON for the export feature only. No frontend serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Compact logger to ETW / stderr. Off by default in release builds.
+log = "0.4"
+env_logger = "0.11"
+
+# Crossbeam channel: lock-free MPSC, faster than std::mpsc for the
+# hot keyboard-hook path. The sender side runs inside the OS hook
+# callback where every microsecond visibly impacts input latency.
+crossbeam-channel = "0.5"
+
+# Anyhow keeps error handling out of the hot path; only used on the
+# storage / startup boundary.
+anyhow = "1"
+
+[profile.release]
+# Aggressive size + speed: LTO collapses the windows-rs stubs (the
+# main bloat source) and `panic = "abort"` strips ~30 % of the
+# unwinder. opt-level "z" was tested and gave a smaller binary at
+# noticeable runtime cost — "s" is the sweet spot for this workload.
+panic = "abort"
+codegen-units = 1
+lto = "fat"
+opt-level = "s"
+strip = "symbols"
+overflow-checks = false
+
+[profile.dev]
+# Dev builds keep overflow checks (catches accumulator bugs in the
+# aggregator early) but skip incremental — the project is small
+# enough that incremental adds more linking time than it saves.
+incremental = false

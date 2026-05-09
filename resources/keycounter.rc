@@ -1,0 +1,43 @@
+// Resource script — embeds the manifest, icons, and version info.
+// Compiled by rc.exe (MSVC) or windres (GNU) via the embed-resource
+// build dependency. Keep declarations IDE-friendly and avoid the
+// preprocessor #include of windows.h to stay portable across both
+// toolchains.
+
+// Manifest. ID 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID.
+1 24 "app.manifest"
+
+// Icon entries are pulled in from a separate `icons.rc` companion only
+// when the resource files exist on disk — see build.rs. Adding them
+// here unconditionally would break a fresh checkout (rc.exe errors on
+// missing referenced files), and the tray code already falls back to
+// the default Win32 application icon when the resource ID is absent.
+
+// Version info. Picked up by Explorer's Properties dialog and by
+// Windows Defender SmartScreen (a higher-than-zero file version
+// reduces the "unknown publisher" friction slightly).
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName",      "KeyCounter contributors\0"
+            VALUE "FileDescription",  "Privacy-first keystroke counter (native shell)\0"
+            VALUE "FileVersion",      "0.1.0.0\0"
+            VALUE "InternalName",     "keycounter\0"
+            VALUE "LegalCopyright",   "MIT License\0"
+            VALUE "OriginalFilename", "keycounter.exe\0"
+            VALUE "ProductName",      "KeyCounter\0"
+            VALUE "ProductVersion",   "0.1.0.0\0"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x0409, 0x04B0
+    }
+}

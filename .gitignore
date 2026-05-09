@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+Cargo.lock
+.vs/
+.vscode/
+*.pdb
+*.exe
+*.user
+/dist
+/installer/output
+/.idea
