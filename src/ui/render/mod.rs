@@ -18,15 +18,15 @@ pub mod calendar;
 pub mod punch_card;
 
 use anyhow::Result;
-use windows::core::{w, Interface, HRESULT};
+use windows::core::{w, Interface};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_SIZE_U,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1CreateFactory, ID2D1Factory1, ID2D1HwndRenderTarget, ID2D1RenderTarget,
-    ID2D1SolidColorBrush, D2D1_BRUSH_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
+    ID2D1SolidColorBrush, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
     D2D1_RENDER_TARGET_USAGE_NONE,
 };
@@ -371,64 +371,20 @@ pub fn rect_to_d2d(r: &RECT) -> windows::Win32::Graphics::Direct2D::Common::D2D_
     }
 }
 
-/// `CreateSolidColorBrush` wrapper.
+/// `CreateSolidColorBrush` wrapper. Trivial bind to the
+/// windows-rs-generated method, but keeps the `unsafe` block and the
+/// `&color` reference out of every call site — most of which sit in
+/// hot inner loops in the heatmap / calendar / punch-card renderers.
 ///
-/// windows-rs 0.58 doesn't surface this method to dot-syntax calls on
-/// `ID2D1RenderTarget` (the generated impl's signature trips method
-/// resolution) and its `ID2D1RenderTarget_Vtbl` fields are pub(crate),
-/// so neither the normal `.CreateSolidColorBrush(...)` nor a
-/// `target.vtable().CreateSolidColorBrush` field access works.
-///
-/// We sidestep the binding by mirroring the relevant slice of the COM
-/// vtable with a `#[repr(C)]` struct. The COM ABI is defined by d2d1.h
-/// (`ID2D1RenderTarget : ID2D1Resource : IUnknown`) and is stable
-/// across Windows versions — these layouts cannot move without
-/// breaking every COM consumer on the platform, so the transmute is
-/// sound. Same C ABI call as the documented method, same HRESULT
-/// contract.
-#[repr(C)]
-#[allow(non_snake_case)]
-struct D2D1RenderTargetVtblMirror {
-    // IUnknown
-    QueryInterface: usize,
-    AddRef: usize,
-    Release: usize,
-    // ID2D1Resource
-    GetFactory: usize,
-    // ID2D1RenderTarget — methods in declaration order from d2d1.h.
-    // We only spell out CreateSolidColorBrush; the rest are slot
-    // placeholders so the offset of that method matches the real
-    // vtable.
-    CreateBitmap: usize,
-    CreateBitmapFromWicBitmap: usize,
-    CreateSharedBitmap: usize,
-    CreateBitmapBrush: usize,
-    CreateSolidColorBrush: unsafe extern "system" fn(
-        this: *mut std::ffi::c_void,
-        color: *const D2D1_COLOR_F,
-        brush_properties: *const D2D1_BRUSH_PROPERTIES,
-        out_brush: *mut *mut std::ffi::c_void,
-    ) -> HRESULT,
-}
-
+/// Note: this method is feature-gated by `Foundation_Numerics` in
+/// windows-rs 0.58 because `D2D1_BRUSH_PROPERTIES` contains a
+/// `D2D1_MATRIX_3X2_F`. Cargo.toml has that feature enabled — without
+/// it the method silently disappears from the bindings (which is what
+/// the earlier "method not found" errors were really telling us).
 pub fn create_solid_brush(
     target: &ID2D1RenderTarget,
     color: D2D1_COLOR_F,
 ) -> Result<ID2D1SolidColorBrush> {
-    unsafe {
-        let this = target.as_raw();
-        // The COM-object layout is `[vtable_ptr, ...]` — first usize is
-        // the pointer to the vtable.
-        let vtbl_ptr: *const D2D1RenderTargetVtblMirror =
-            *(this as *const *const D2D1RenderTargetVtblMirror);
-        let mut out: *mut std::ffi::c_void = std::ptr::null_mut();
-        let hr = ((*vtbl_ptr).CreateSolidColorBrush)(
-            this,
-            &color,
-            std::ptr::null(),
-            &mut out,
-        );
-        hr.ok()?;
-        Ok(ID2D1SolidColorBrush::from_raw(out))
-    }
+    let brush = unsafe { target.CreateSolidColorBrush(&color, None)? };
+    Ok(brush)
 }
