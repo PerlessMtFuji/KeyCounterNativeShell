@@ -25,11 +25,12 @@ use crate::ui::render::{Brush, Font, RenderContext};
 pub struct ViewOutput {
     pub picked_theme: Option<Theme>,
     /// Settings that just need a re-paint / persistence pass — main
-    /// window doesn't need to do anything special, just flush the
-    /// settings file. Push 4 handles the actual write-through.
+    /// window doesn't need to do anything special, the settings file
+    /// is flushed on clean exit.
     pub settings_dirty: bool,
     pub reset_requested: bool,
     pub export_requested: bool,
+    pub autostart_changed: bool,
 }
 
 pub fn draw(
@@ -103,8 +104,6 @@ pub fn draw(
                     }
                 },
             );
-            // Autostart toggle (no-op wiring yet — Push 4 lands the
-            // registry write)
             h += row_with_toggle(
                 ctx,
                 Rect::new(row_rect.x, row_rect.y + h, row_rect.w, 56.0),
@@ -115,6 +114,7 @@ pub fn draw(
                 |new| {
                     if new != current.autostart {
                         i18n::SETTINGS.write().autostart = new;
+                        OUT_AUTOSTART.with(|c| c.set(true));
                     }
                 },
             );
@@ -415,6 +415,7 @@ pub fn draw(
     out.picked_theme = OUT_THEME.with(|c| c.take());
     out.reset_requested = OUT_RESET.with(|c| c.take());
     out.export_requested = OUT_EXPORT.with(|c| c.take());
+    out.autostart_changed = OUT_AUTOSTART.with(|c| c.take());
     out
 }
 
@@ -422,6 +423,7 @@ thread_local! {
     static OUT_THEME: std::cell::Cell<Option<Theme>> = const { std::cell::Cell::new(None) };
     static OUT_RESET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static OUT_EXPORT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static OUT_AUTOSTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Draw a section frame (heading + body) and return its total height.

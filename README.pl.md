@@ -56,9 +56,10 @@ Wczesny development. Architektura i moduły core (hook, store, keycode, achievem
 | i18n PL/EN | ✅ |
 | Light theme | ✅ |
 | Animacje pulsu | ✅ |
-| Tray icon + menu | ⏳ |
-| Autostart | ⏳ |
-| Eksport JSON | ⏳ |
+| Tray icon + menu | ✅ |
+| Autostart | ✅ |
+| Eksport JSON | ✅ |
+| Zapis ustawień | ✅ |
 | Instalator MSI | ⏳ |
 | Code signing | ⏳ |
 

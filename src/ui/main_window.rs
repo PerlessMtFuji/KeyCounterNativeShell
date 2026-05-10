@@ -33,13 +33,15 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
-    GetWindowLongPtrW, KillTimer, LoadCursorW, PostQuitMessage, RegisterClassExW, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
-    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HCURSOR, HICON, HMENU, IDC_ARROW, MINMAXINFO, MSG,
-    SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_CREATE, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
+    GetWindowLongPtrW, IsWindowVisible, KillTimer, LoadCursorW, MessageBoxW, PostQuitMessage,
+    RegisterClassExW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HCURSOR,
+    HICON, HMENU, IDC_ARROW, IDYES, MB_ICONWARNING, MB_YESNO, MINMAXINFO, MSG, SWP_NOACTIVATE,
+    SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE,
+    WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_LBUTTONDBLCLK, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONUP, WM_SIZE, WM_TIMER, WNDCLASSEXW,
+    WS_OVERLAPPEDWINDOW,
 };
 
 /// HRESULT D2D returns from `EndDraw` when the render target needs to
@@ -51,6 +53,9 @@ pub const D2DERR_RECREATE_TARGET: HRESULT = HRESULT(0x8899000Cu32 as i32);
 use crate::app::AppState;
 use crate::core::i18n;
 use crate::core::stats::DataSnapshot;
+use crate::system::tray::{
+    self, ID_QUIT, ID_SHOW, ID_TOGGLE_PAUSE, ID_TOGGLE_WIDGET, WM_TRAY_CALLBACK,
+};
 use crate::ui::controls::InputState;
 use crate::ui::live_pulse;
 use crate::ui::render::primitives::{clear, Rect};
@@ -280,14 +285,58 @@ impl Window {
             }
         }
         if out.reset_requested {
-            // Push 4 will surface a confirm dialog; for now do nothing
-            // destructive — log so we know the wire-up works.
-            log::info!("settings: reset requested (Push 4 will land it)");
+            self.confirm_and_reset();
         }
         if out.export_requested {
-            log::info!("settings: export requested (Push 4 will land it)");
+            match crate::system::export::save_dialog(self.hwnd, &self.state) {
+                Ok(Some(path)) => log::info!("export saved to {}", path.display()),
+                Ok(None) => log::info!("export cancelled"),
+                Err(e) => log::warn!("export failed: {e}"),
+            }
         }
-        // settings_dirty: settings persistence file write lands in Push 4.
+        if out.autostart_changed {
+            let enabled = i18n::SETTINGS.read().autostart;
+            if let Err(e) = crate::system::autostart::apply(enabled) {
+                log::warn!("autostart apply failed: {e}");
+            }
+        }
+    }
+
+    fn confirm_and_reset(&mut self) {
+        // MessageBox is a modal blocking call. That's fine — the user
+        // already clicked Reset and expects the world to pause until
+        // they confirm.
+        let title: Vec<u16> = "KeyCounter\0".encode_utf16().collect();
+        let body: Vec<u16> =
+            "Wipe the local database? All counts and achievements will be lost.\0"
+                .encode_utf16()
+                .collect();
+        let answer = unsafe {
+            MessageBoxW(
+                self.hwnd,
+                PCWSTR(body.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_YESNO | MB_ICONWARNING,
+            )
+        };
+        if answer != IDYES {
+            return;
+        }
+        // We open a fresh write connection — the store's reader() gives
+        // us a read-only handle, and `reset_all` needs a transaction.
+        match rusqlite::Connection::open(self.state.store.db_path()) {
+            Ok(mut conn) => {
+                if let Err(e) = crate::core::store::reset_all(&mut conn) {
+                    log::warn!("reset_all failed: {e}");
+                } else {
+                    self.state.live_counter.store(0, Ordering::Relaxed);
+                    self.prev_counter = 0;
+                    self.state.pulse.write().clear();
+                    self.tick_full();
+                }
+            }
+            Err(e) => log::warn!("reset: open write conn failed: {e}"),
+        }
     }
 
     fn apply_sidebar_output(&mut self, out: sidebar::SidebarOutput) {
@@ -325,6 +374,13 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
             let _ = SetTimer(hwnd, T_PULSE, 500, None);
             let _ = SetTimer(hwnd, T_LIVE, 1_000, None);
             let _ = SetTimer(hwnd, T_FULL, 5_000, None);
+
+            // Install tray icon. A failure is non-fatal — without the
+            // tray the user can still close via the titlebar — but log
+            // so we know the install pass dropped it.
+            if let Err(e) = tray::install(hwnd, "KeyCounter") {
+                log::warn!("tray install failed: {e}");
+            }
             return LRESULT(0);
         }
 
@@ -408,13 +464,74 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
                 LRESULT(0)
             }
             WM_CLOSE => {
-                let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd);
+                // Closing via [X] hides the window instead of quitting
+                // — the tray icon stays so the counter keeps running.
+                // ID_QUIT in the tray menu posts a real destroy.
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                LRESULT(0)
+            }
+            WM_TRAY_CALLBACK => {
+                // lParam.low = the mouse event the user generated; the
+                // high word is the icon id (always TRAY_UID here).
+                let event = (l.0 & 0xFFFF) as u32;
+                match event {
+                    WM_LBUTTONUP | WM_LBUTTONDBLCLK => {
+                        // Toggle visibility of the main window — single
+                        // click brings it back, click again hides.
+                        if IsWindowVisible(hwnd).as_bool() {
+                            let _ = ShowWindow(hwnd, SW_HIDE);
+                        } else {
+                            let _ = ShowWindow(hwnd, SW_RESTORE);
+                            let _ = SetForegroundWindow(hwnd);
+                        }
+                    }
+                    WM_RBUTTONUP => {
+                        let widget_visible = crate::ui::shared::is_widget_visible();
+                        let _ = tray::show_menu(hwnd, win.state.is_paused(), widget_visible);
+                    }
+                    _ => {}
+                }
+                LRESULT(0)
+            }
+            WM_COMMAND => {
+                let id = (w.0 & 0xFFFF) as u16;
+                match id {
+                    ID_SHOW => {
+                        let _ = ShowWindow(hwnd, SW_RESTORE);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
+                    ID_TOGGLE_PAUSE => {
+                        win.state.toggle_paused();
+                        let _ = InvalidateRect(hwnd, None, false);
+                    }
+                    ID_TOGGLE_WIDGET => {
+                        if let Some(wh) = crate::ui::shared::widget_hwnd() {
+                            let now_visible = !crate::ui::shared::is_widget_visible();
+                            let _ = ShowWindow(
+                                wh,
+                                if now_visible { SW_SHOW } else { SW_HIDE },
+                            );
+                            crate::ui::shared::set_widget_visible(now_visible);
+                        }
+                    }
+                    ID_QUIT => {
+                        let _ = DestroyWindow(hwnd);
+                    }
+                    _ => {}
+                }
                 LRESULT(0)
             }
             WM_DESTROY => {
                 let _ = KillTimer(hwnd, T_PULSE);
                 let _ = KillTimer(hwnd, T_LIVE);
                 let _ = KillTimer(hwnd, T_FULL);
+                let _ = tray::remove(hwnd);
+                // Also tear down the widget so it doesn't outlive the
+                // main window (its WNDPROC would dereference a stale
+                // AppState clone otherwise).
+                if let Some(wh) = crate::ui::shared::widget_hwnd() {
+                    let _ = DestroyWindow(wh);
+                }
                 // Drop the boxed window.
                 let _ = Box::from_raw(win_ptr);
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);

@@ -1,14 +1,19 @@
 // Floating widget — small always-on-top window with the live counters.
 //
 // Two visual modes (`widget_compact` in settings):
-//   * Full     — 180×84 card: KPM big, today total small underneath.
-//   * Compact  — 130×38 pill: KPM as the only number, semi-transparent.
+//   * Full     — 200×96 card: KPM big, today total small underneath.
+//   * Compact  — 140×44 pill: KPM as the only number, semi-transparent.
 //
 // Implementation notes:
 //   * `WS_POPUP | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW`.
 //     LAYERED + SetLayeredWindowAttributes(LWA_ALPHA) is enough for
-//     "translucent window" — we don't need UpdateLayeredWindow because
-//     the body is opaque, only the whole-window alpha needs to vary.
+//     whole-window translucency — we don't need UpdateLayeredWindow
+//     because the body is opaque, only the alpha varies.
+//   * Rounded silhouette: `SetWindowRgn` with `CreateRoundRectRgn`
+//     clips the *window itself* to a rounded rectangle. Without this
+//     the layered window paints its full square bg behind the card
+//     and you see corners poking out where the rounded fill ends.
+//     The region is re-set every time the mode/DPI changes.
 //   * Dragging via WM_NCHITTEST → HTCAPTION trick: any click in the
 //     body acts like a titlebar grab.
 //   * The widget owns its own RenderContext (different HWND than the
@@ -26,7 +31,8 @@ use chrono::Utc;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, UpdateWindow, HBRUSH, PAINTSTRUCT,
+    BeginPaint, CreateRoundRectRgn, EndPaint, InvalidateRect, SetWindowRgn, UpdateWindow, HBRUSH,
+    PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -34,11 +40,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetClientRect, GetWindowLongPtrW, KillTimer, LoadCursorW,
     RegisterClassExW, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
     ShowWindow, SystemParametersInfoW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA,
-    HCURSOR, HICON, HMENU, HTCAPTION, IDC_HAND, LWA_ALPHA, SPI_GETWORKAREA,
-    SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_SHOW, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    WINDOW_EX_STYLE, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_NCHITTEST,
-    WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    HCURSOR, HICON, HMENU, HTCAPTION, IDC_HAND, LWA_ALPHA, SPI_GETWORKAREA, SWP_NOACTIVATE,
+    SWP_NOSIZE, SWP_NOZORDER, SW_SHOW, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WM_CREATE, WM_DESTROY,
+    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::app::AppState;
@@ -142,16 +147,19 @@ impl Widget {
         let dpi = unsafe { GetDpiForWindow(self.hwnd) }.max(96) as f32;
         let scale = dpi / 96.0;
         let (w, h) = if compact { COMPACT_DIPS } else { FULL_DIPS };
+        let w_px = (w as f32 * scale) as i32;
+        let h_px = (h as f32 * scale) as i32;
         unsafe {
             let _ = SetWindowPos(
                 self.hwnd,
                 HWND::default(),
                 0,
                 0,
-                (w as f32 * scale) as i32,
-                (h as f32 * scale) as i32,
+                w_px,
+                h_px,
                 SWP_NOZORDER | SWP_NOACTIVATE | windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE,
             );
+            apply_rounded_region(self.hwnd, w_px, h_px, compact);
         }
     }
 
@@ -332,6 +340,27 @@ impl Widget {
     }
 }
 
+/// Replace the window's clipping region with a rounded rectangle of
+/// the correct radius for the active mode. GDI takes ownership of the
+/// region handle after `SetWindowRgn` succeeds — passing `true` for
+/// `bRedraw` triggers a non-client refresh so the shape change is
+/// immediately visible. We don't bother deleting the previous region
+/// because GDI clones the bits we passed in (and the next call replaces
+/// it).
+unsafe fn apply_rounded_region(hwnd: HWND, w_px: i32, h_px: i32, compact: bool) {
+    // CreateRoundRectRgn uses width/height (in device units) for the
+    // ellipse — i.e. 2× the corner radius. For the pill we want a full
+    // capsule, so the diameter equals the window height; for the full
+    // card we use ~26 px diameter (≈ 13 px corner radius) which matches
+    // the painted card frame.
+    let diameter = if compact { h_px } else { 26 };
+    let rgn = CreateRoundRectRgn(0, 0, w_px + 1, h_px + 1, diameter, diameter);
+    if !rgn.is_invalid() {
+        let _ = SetWindowRgn(hwnd, rgn, true);
+        // SetWindowRgn takes ownership on success — do NOT DeleteObject.
+    }
+}
+
 extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     unsafe {
         if msg == WM_CREATE {
@@ -356,14 +385,16 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
             }
             WM_ERASEBKGND => LRESULT(1),
             WM_SIZE => {
+                let mut rect = RECT::default();
+                let _ = GetClientRect(hwnd, &mut rect);
+                let w_px = (rect.right - rect.left).max(1);
+                let h_px = (rect.bottom - rect.top).max(1);
                 if let Some(ctx) = widget.ctx.as_mut() {
-                    let mut rect = RECT::default();
-                    let _ = GetClientRect(hwnd, &mut rect);
-                    let _ = ctx.resize(
-                        (rect.right - rect.left).max(1) as u32,
-                        (rect.bottom - rect.top).max(1) as u32,
-                    );
+                    let _ = ctx.resize(w_px as u32, h_px as u32);
                 }
+                // Re-clip — DPI and content swaps both flow through here.
+                let compact = i18n::SETTINGS.read().widget_compact;
+                apply_rounded_region(hwnd, w_px, h_px, compact);
                 LRESULT(0)
             }
             WM_TIMER if w.0 as usize == T_REFRESH => {
@@ -429,6 +460,11 @@ pub fn spawn(state: AppState) -> Result<HWND> {
         let state_box = Box::new(state);
         let state_ptr = Box::into_raw(state_box);
 
+        // Honour the persisted compact mode on first paint so we don't
+        // briefly flash the full card before the timer-driven resize.
+        let initial_compact = i18n::SETTINGS.read().widget_compact;
+        let (init_w, init_h) = if initial_compact { COMPACT_DIPS } else { FULL_DIPS };
+
         let hwnd = CreateWindowExW(
             ex,
             CLASS_NAME,
@@ -438,8 +474,8 @@ pub fn spawn(state: AppState) -> Result<HWND> {
             // The user can drag; snap-to-taskbar repositions when on.
             16,
             16,
-            FULL_DIPS.0,
-            FULL_DIPS.1,
+            init_w,
+            init_h,
             HWND::default(),
             HMENU::default(),
             hinstance,
@@ -456,8 +492,20 @@ pub fn spawn(state: AppState) -> Result<HWND> {
             LWA_ALPHA,
         );
 
+        // Clip the window to a rounded rectangle so the layered bg
+        // doesn't show its square footprint outside the painted card.
+        let dpi = GetDpiForWindow(hwnd).max(96) as f32;
+        let scale = dpi / 96.0;
+        let compact = i18n::SETTINGS.read().widget_compact;
+        let (w, h) = if compact { COMPACT_DIPS } else { FULL_DIPS };
+        apply_rounded_region(hwnd, (w as f32 * scale) as i32, (h as f32 * scale) as i32, compact);
+
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = UpdateWindow(hwnd);
+
+        // Publish for the tray/menu glue to find.
+        crate::ui::shared::set_widget_hwnd(hwnd);
+        crate::ui::shared::set_widget_visible(true);
         Ok(hwnd)
     }
 }

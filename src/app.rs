@@ -88,6 +88,13 @@ pub fn run() -> Result<()> {
     let data_dir = paths::ensure_data_dir().context("create %LOCALAPPDATA%\\KeyCounter")?;
     log::info!("data dir: {}", data_dir.display());
 
+    // Load persisted settings before opening the DB — the UI thread
+    // reads SETTINGS the moment the main window appears.
+    {
+        let s = crate::system::settings_io::load();
+        *crate::core::i18n::SETTINGS.write() = s;
+    }
+
     let db_path = paths::db_path();
     let store = Store::open(&db_path).with_context(|| format!("open SQLite at {}", db_path.display()))?;
 
@@ -123,5 +130,13 @@ pub fn run() -> Result<()> {
     };
 
     crate::ui::run_main_window(state)?;
+
+    // Persist settings on clean exit. Failures here aren't fatal — the
+    // user will see today's tweaks come back as defaults on next launch,
+    // which is the worst-case behaviour we're already covering.
+    let snapshot = crate::core::i18n::SETTINGS.read().clone();
+    if let Err(e) = crate::system::settings_io::save(&snapshot) {
+        log::warn!("settings_io::save failed: {e}");
+    }
     Ok(())
 }

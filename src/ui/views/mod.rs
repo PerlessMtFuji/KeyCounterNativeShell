@@ -40,6 +40,10 @@ pub struct ViewOutput {
     pub settings_dirty: bool,
     pub reset_requested: bool,
     pub export_requested: bool,
+    /// Set when the autostart toggle just flipped. Main window calls
+    /// `system::autostart::apply` so the registry write happens
+    /// immediately, not just at exit.
+    pub autostart_changed: bool,
 }
 
 pub fn draw(
@@ -73,6 +77,7 @@ pub fn draw(
                 settings_dirty: s.settings_dirty,
                 reset_requested: s.reset_requested,
                 export_requested: s.export_requested,
+                autostart_changed: s.autostart_changed,
             }
         }
     }

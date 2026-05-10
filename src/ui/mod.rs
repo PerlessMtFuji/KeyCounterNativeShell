@@ -11,6 +11,7 @@ pub mod floating_widget;
 pub mod live_pulse;
 pub mod main_window;
 pub mod render;
+pub mod shared;
 pub mod sidebar;
 pub mod views;
 

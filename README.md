@@ -56,9 +56,10 @@ Early development. Core modules (hook, store, keycode, achievements, i18n, layou
 | i18n PL/EN | ✅ |
 | Light theme | ✅ |
 | Pulse animations | ✅ |
-| Tray icon + menu | ⏳ |
-| Autostart | ⏳ |
-| JSON export | ⏳ |
+| Tray icon + menu | ✅ |
+| Autostart | ✅ |
+| JSON export | ✅ |
+| Settings persistence | ✅ |
 | MSI installer | ⏳ |
 | Code signing | ⏳ |
 
