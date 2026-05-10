@@ -79,12 +79,17 @@ pub fn current_lang() -> Lang {
 }
 
 /// Translate a key (with optional {var} substitution).
-pub fn t(key: &str) -> &'static str {
+///
+/// Keys are always compile-time string literals — we keep the
+/// `&'static str` bound so the fallback can return the key itself when
+/// a missing translation surfaces in the wild (better visible than an
+/// empty string, and a real key always outlives the call).
+pub fn t(key: &'static str) -> &'static str {
     let lang = current_lang();
     lookup(lang, key)
 }
 
-pub fn t_var(key: &str, vars: &[(&str, &str)]) -> String {
+pub fn t_var(key: &'static str, vars: &[(&str, &str)]) -> String {
     let lang = current_lang();
     let mut s = lookup(lang, key).to_string();
     for (k, v) in vars {
@@ -93,7 +98,7 @@ pub fn t_var(key: &str, vars: &[(&str, &str)]) -> String {
     s
 }
 
-fn lookup(lang: Lang, key: &str) -> &'static str {
+fn lookup(lang: Lang, key: &'static str) -> &'static str {
     let val = match lang {
         Lang::En => en(key),
         Lang::Pl => pl(key).or_else(|| en(key)),
@@ -108,6 +113,7 @@ fn lookup(lang: Lang, key: &str) -> &'static str {
 
 fn en(key: &str) -> Option<&'static str> {
     Some(match key {
+        // Sidebar / nav
         "nav.dashboard" => "Dashboard",
         "nav.heatmap" => "Heatmap",
         "nav.stats" => "Stats",
