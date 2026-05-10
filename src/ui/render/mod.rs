@@ -275,7 +275,11 @@ impl RenderContext {
             (Font::Nav, 14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false),
             (Font::Heading, 18.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
             (Font::LiveKpm, 22.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
-            (Font::Glyph, 9.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false),
+            // Glyph: heatmap key labels. Semibold + larger so the
+            // letter survives both heat-tinted backgrounds and a 40-DIP
+            // key cell; the old 9 px Normal vanished into the bright
+            // pink end of the heat ramp.
+            (Font::Glyph, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
         ];
         for (slot, size, weight, _uppercase) in specs {
             let format = unsafe {

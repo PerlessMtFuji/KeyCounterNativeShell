@@ -207,8 +207,7 @@ fn en(key: &str) -> Option<&'static str> {
         "settings.autostartHint" => "Launch KeyCounter when you log in.",
         "settings.display" => "Display",
         "settings.layoutLabel" => "Keyboard layout",
-        "settings.layoutHint" =>
-            "Affects how labels are drawn on the heatmap. Counts are physical-position based and never change.",
+        "settings.layoutHint" => "Changes heatmap labels only — counters track physical positions.",
         "settings.themeLabel" => "Theme",
         "settings.themeDark" => "Dark",
         "settings.themeLight" => "Light",
@@ -260,8 +259,7 @@ fn en(key: &str) -> Option<&'static str> {
         "widget.opacityHint" =>
             "How solid the compact pill looks against your wallpaper.",
         "widget.snapLabel" => "Anchor to taskbar",
-        "widget.snapHint" =>
-            "Auto-position the widget above the bottom-right corner of the screen each time it opens — looks pinned to the taskbar.",
+        "widget.snapHint" => "Pin to the bottom-right corner of the work area.",
 
         "welcome.tag" => "First launch",
         "welcome.title" => "Welcome to KeyCounter",
@@ -374,8 +372,7 @@ fn pl(key: &str) -> Option<&'static str> {
         "settings.autostartHint" => "Włącz KeyCounter przy logowaniu.",
         "settings.display" => "Wygląd",
         "settings.layoutLabel" => "Układ klawiatury",
-        "settings.layoutHint" =>
-            "Wpływa tylko na etykiety na mapie cieplnej. Liczniki bazują na fizycznych pozycjach i się nie zmieniają.",
+        "settings.layoutHint" => "Zmienia tylko etykiety mapy cieplnej — liczniki śledzą fizyczne pozycje.",
         "settings.themeLabel" => "Motyw",
         "settings.themeDark" => "Ciemny",
         "settings.themeLight" => "Jasny",
@@ -426,8 +423,7 @@ fn pl(key: &str) -> Option<&'static str> {
         "widget.opacityLabel" => "Krycie kapsułki",
         "widget.opacityHint" => "Jak mocno kapsułka odcina się od tapety.",
         "widget.snapLabel" => "Przyklej do paska zadań",
-        "widget.snapHint" =>
-            "Po każdym pokazaniu widget pozycjonuje się przy prawej krawędzi nad paskiem zadań.",
+        "widget.snapHint" => "Przyklej do prawego dolnego rogu pulpitu.",
 
         "welcome.tag" => "Pierwsze uruchomienie",
         "welcome.title" => "Witaj w KeyCounter",

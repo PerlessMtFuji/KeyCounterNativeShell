@@ -69,6 +69,20 @@ const TITLE: PCWSTR = w!("KeyCounter");
 const T_PULSE: usize = 1;
 const T_LIVE: usize = 2;
 const T_FULL: usize = 3;
+/// 60 FPS animation tick. Fires for the duration of an active pulse
+/// glow only — `KillTimer` stops it once `now - last_event_ms` exceeds
+/// the glow window, so idle CPU stays at the snapshot cadence.
+const T_ANIM: usize = 4;
+
+/// Animation tick spacing (ms). 16 ms ≈ 60 FPS, which is what the
+/// React/CSS version of KeyCounter ran at and what the pulse decay
+/// curve was tuned for.
+const ANIM_TICK_MS: u32 = 16;
+
+/// How long the pulse dot stays animated after the last keystroke.
+/// Slightly longer than before (700 → 900 ms) so the ease-out tail is
+/// visible without being distracting.
+pub const PULSE_GLOW_MS: i64 = 900;
 
 const INITIAL_DIPS: (i32, i32) = (1100, 720);
 
@@ -132,16 +146,48 @@ impl Window {
         Ok(())
     }
 
-    /// Tick: pulse counter + live snapshot.
+    /// Sync the hook counter into the pulse history. Runs every
+    /// 100 ms — the animation timer (16 ms) handles the visible glow
+    /// decay, so we don't need to repaint here unless there's actual
+    /// activity to surface.
     fn tick_pulse(&mut self) {
         let counter = self.state.live_counter.load(Ordering::Relaxed);
         let delta = counter - self.prev_counter;
         self.prev_counter = counter;
-        if delta > 0 {
-            self.last_event_ms = self.now_ms();
-        }
         let now = self.now_ms();
-        self.state.pulse.write().record(now, delta.max(0));
+        if delta > 0 {
+            self.last_event_ms = now;
+            self.state.pulse.write().record(now, delta);
+            self.ensure_anim_timer();
+            unsafe {
+                let _ = InvalidateRect(self.hwnd, None, false);
+            }
+        } else {
+            // No new keystrokes — still trim the pulse history so KPM
+            // ticks down naturally. `record(_, 0)` does the prune.
+            self.state.pulse.write().record(now, 0);
+            // Idle repaint at the 100 ms cadence so the KPM block
+            // animates down even if no new events arrive.
+            unsafe {
+                let _ = InvalidateRect(self.hwnd, None, false);
+            }
+        }
+    }
+
+    fn ensure_anim_timer(&self) {
+        unsafe {
+            let _ = SetTimer(self.hwnd, T_ANIM, ANIM_TICK_MS, None);
+        }
+    }
+
+    fn tick_anim(&mut self) {
+        let age = self.now_ms() - self.last_event_ms;
+        if age >= PULSE_GLOW_MS {
+            unsafe {
+                let _ = KillTimer(self.hwnd, T_ANIM);
+            }
+            return;
+        }
         unsafe {
             let _ = InvalidateRect(self.hwnd, None, false);
         }
@@ -371,9 +417,14 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, raw as isize);
 
             // Set up timers as soon as the window exists.
-            let _ = SetTimer(hwnd, T_PULSE, 500, None);
+            // T_PULSE drives the hook-counter delta sync; we run it at
+            // 100 ms so the pulse glow starts visibly within a frame or
+            // two of a key landing. T_FULL drops to 1.5 s so today's
+            // total + lifetime catch up without feeling laggy. T_ANIM
+            // is registered lazily on the first keystroke.
+            let _ = SetTimer(hwnd, T_PULSE, 100, None);
             let _ = SetTimer(hwnd, T_LIVE, 1_000, None);
-            let _ = SetTimer(hwnd, T_FULL, 5_000, None);
+            let _ = SetTimer(hwnd, T_FULL, 1_500, None);
 
             // Install tray icon. A failure is non-fatal — without the
             // tray the user can still close via the titlebar — but log
@@ -440,6 +491,7 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
                     T_PULSE => win.tick_pulse(),
                     T_LIVE => win.tick_live(),
                     T_FULL => win.tick_full(),
+                    T_ANIM => win.tick_anim(),
                     _ => {}
                 }
                 LRESULT(0)
@@ -525,6 +577,7 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
                 let _ = KillTimer(hwnd, T_PULSE);
                 let _ = KillTimer(hwnd, T_LIVE);
                 let _ = KillTimer(hwnd, T_FULL);
+                let _ = KillTimer(hwnd, T_ANIM);
                 let _ = tray::remove(hwnd);
                 // Also tear down the widget so it doesn't outlive the
                 // main window (its WNDPROC would dereference a stale

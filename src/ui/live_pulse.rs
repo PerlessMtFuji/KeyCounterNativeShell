@@ -1,17 +1,20 @@
 // Top-bar live status: KPM, last-minute, last-hour, and a thin pulse
 // indicator that flashes when a keystroke arrives.
 //
-// The "pulse" is a per-frame interpolation against `last_event_ms`.
-// We don't drive it on a tight rAF — the main window only paints on
-// the 500 ms tick (or sooner when the snapshot updates), which is
-// plenty for the pulse glow to feel responsive without spending CPU
-// on idle redraws.
+// The pulse animation rides the 60 FPS `T_ANIM` timer the main window
+// spins up on each keystroke. The glow shape is "solid 5 px dot + soft
+// alpha halo that decays on an ease-out cubic" — same curve the
+// original CSS version used. We build the halo brush on the fly from
+// the palette's pulse colour rather than caching another brush slot,
+// because the alpha varies smoothly across frames.
+
+use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::core::stats::PulseHistory;
 use crate::ui::render::primitives::{
     fill_circle, fill_rect, fill_rounded, text, HAlign, Rect, VAlign,
 };
-use crate::ui::render::{Brush, Font, RenderContext};
+use crate::ui::render::{create_solid_brush, Brush, Font, RenderContext};
 use crate::core::i18n;
 use crate::core::store::LiveSnapshot;
 
@@ -37,18 +40,44 @@ pub fn draw(
         1.0,
     );
 
-    // Pulse dot — lit for ~700 ms after the last event, fading back to
-    // text_dim. Distance keeps the dot visible without being noisy.
+    // Pulse dot — solid 5.5 px core + an alpha halo that breathes out
+    // on every keystroke. The 900 ms window matches PULSE_GLOW_MS; we
+    // shape the decay with an ease-out cubic (1-(1-t)^3) so the impact
+    // hits fast and the tail falls off smoothly, the way the original
+    // CSS animation did.
     let age = (now_ms - last_event_ms).max(0);
-    let glow = if age < 700 {
-        1.0 - (age as f32 / 700.0)
-    } else {
-        0.0
-    };
+    let glow_window: i64 = 900;
+    let t = (1.0 - (age as f32 / glow_window as f32)).clamp(0.0, 1.0);
+    let ease = 1.0 - (1.0 - t).powi(3);
     let pad = 18.0;
     let dot_x = rect.x + pad + 8.0;
     let dot_y = rect.y + rect.h * 0.5;
-    fill_circle(ctx, dot_x, dot_y, 6.0 + 4.0 * glow, Brush::Pulse);
+    // Soft halo first — one-shot brush at 35 % alpha × ease. Direct2D
+    // brush creation is cheap (≈ µs); we'd cache if this loop ran 60
+    // times per frame, but it doesn't.
+    if ease > 0.02 {
+        let p = ctx.palette().pulse;
+        let halo_color = D2D1_COLOR_F {
+            r: p[0],
+            g: p[1],
+            b: p[2],
+            a: 0.35 * ease,
+        };
+        if let Ok(halo) = create_solid_brush(&ctx.target, halo_color) {
+            let ellipse = windows::Win32::Graphics::Direct2D::D2D1_ELLIPSE {
+                point: windows::Win32::Graphics::Direct2D::Common::D2D_POINT_2F {
+                    x: dot_x,
+                    y: dot_y,
+                },
+                radiusX: 8.0 + 14.0 * ease,
+                radiusY: 8.0 + 14.0 * ease,
+            };
+            unsafe {
+                ctx.target.FillEllipse(&ellipse, &halo);
+            }
+        }
+    }
+    fill_circle(ctx, dot_x, dot_y, 5.5, Brush::Pulse);
 
     // KPM block — rolling 60 s sliding window from PulseHistory.
     let kpm = pulse.kpm();

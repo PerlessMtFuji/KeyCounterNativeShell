@@ -49,8 +49,11 @@ pub fn draw(ctx: &RenderContext, rect: Rect, state: &AppState, _input: &mut Inpu
     );
 
     // Top row: top-20 keys (left, 2/3) + modifier mix & backspace (right, 1/3)
+    // 20 rows × 18 DIPs each + title (22) + inner pad (32) ≈ 414 — give it
+    // a little breathing room so trailing values don't tuck up against
+    // the bar edge.
     let gap = 16.0;
-    let top_h = 280.0;
+    let top_h = 420.0;
     let (top_row, body) = body.split_top(top_h);
     let top_row = top_row.inset(0.0, 0.0, gap, 0.0);
     let left_w = (top_row.w - gap) * (2.0 / 3.0);

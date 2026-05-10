@@ -26,8 +26,8 @@ pub fn top_keys(
     label_width: f32,
     value_width: f32,
 ) {
-    let n = entries.len().min(max_rows);
-    if n == 0 {
+    let want = entries.len().min(max_rows);
+    if want == 0 {
         text(
             ctx,
             rect,
@@ -39,8 +39,13 @@ pub fn top_keys(
         );
         return;
     }
+    // Lay out rows as tall as the available height allows, with a
+    // minimum readable height (≥ body font cap) and a comfortable max.
+    // If even at the floor we'd overflow the card, render only as many
+    // rows as fit — clipping mid-bar looks worse than truncating.
+    let row_h = (rect.h / want as f32).clamp(18.0, 28.0);
+    let n = ((rect.h / row_h).floor() as usize).clamp(1, want);
     let max_val = entries.iter().take(n).map(|(_, v)| *v).max().unwrap_or(1).max(1);
-    let row_h = (rect.h / n as f32).clamp(14.0, 28.0);
     let gap = 4.0;
     let bar_x = rect.x + label_width;
     let bar_max = (rect.w - label_width - value_width).max(20.0);

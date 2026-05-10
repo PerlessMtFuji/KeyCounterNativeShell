@@ -179,14 +179,14 @@ pub fn draw(
 
         // Glyph — only on standard-width keys. Wide ones (Backspace,
         // Enter, Shift, Space) get a label from the keycode default.
+        //
+        // We always use Brush::Text: it's bright on dark theme and
+        // dark on light theme, so it contrasts the card bg. The
+        // previous "switch to Surface above t > 0.55" branch broke the
+        // light theme — Surface *is* the white card, so hot keys went
+        // invisible.
         let lbl = label_for(layout, kp.code);
-        let lbl_brush = if value == 0 {
-            Brush::TextDim
-        } else if t > 0.55 {
-            Brush::Surface
-        } else {
-            Brush::Text
-        };
+        let lbl_brush = if value == 0 { Brush::TextDim } else { Brush::Text };
         text(
             ctx,
             key_rect.shrink(2.0, 2.0),
