@@ -42,6 +42,26 @@ NativeShell is the same idea, rebuilt from the bottom up:
 
 Early development. Core modules (hook, store, keycode, achievements, i18n, layouts) are stable. UI is still being polished — see `docs/roadmap.md`.
 
+| Module | Status |
+|---|---|
+| Keyboard hook (LL) | ✅ |
+| SQLite store + queries | ✅ |
+| Main window + sidebar | ✅ |
+| Dashboard view | ✅ |
+| Heatmap view | ✅ |
+| Stats view | ✅ |
+| Achievements view | ✅ |
+| Settings view | ✅ |
+| Floating widget | ✅ (compact + full) |
+| i18n PL/EN | ✅ |
+| Light theme | ✅ |
+| Pulse animations | ✅ |
+| Tray icon + menu | ⏳ |
+| Autostart | ⏳ |
+| JSON export | ⏳ |
+| MSI installer | ⏳ |
+| Code signing | ⏳ |
+
 ## Build
 
 Requirements:
@@ -61,6 +81,32 @@ cargo build --release      # production binary at target\release\keycounter.exe
 
 A release binary is typically ~3-4 MB. Debug builds are ~30-40 MB (symbols).
 
+## Architecture
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                    KeyCounter NativeShell                  │
+│                                                            │
+│  ┌────────────────────────┐   ┌─────────────────────────┐  │
+│  │  UI (Direct2D)         │   │   Core (Rust)           │  │
+│  │  ────────────────────  │   │   ────────────────────  │  │
+│  │  • main window HWND    │◄──┤  • WH_KEYBOARD_LL hook  │  │
+│  │  • widget (layered)    │   │  • SQLite store thread  │  │
+│  │  • sidebar + 5 views   │   │  • aggregator (256/3s)  │  │
+│  │  • cached brushes/text │   │  • Shell_NotifyIcon     │  │
+│  │  • WM_PAINT on demand  │   │  • Atomic counters      │  │
+│  └────────────────────────┘   └─────────────────────────┘  │
+│              ▲                            │                │
+│              └─── Arc<AppState> ──────────┘                │
+└────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                  %LOCALAPPDATA%\KeyCounter\
+                          keycounter.db
+```
+
+More in [docs/architecture.md](docs/architecture.md).
+
 ## Performance
 
 Measured on a stock Windows 11 box, typing at ~120 KPM:
@@ -78,7 +124,7 @@ The principle: at idle the app blocks in `GetMessageW` — zero polling. The hoo
 
 ## Antivirus
 
-Same caveat as the original: `WH_KEYBOARD_LL` is the same OS primitive that keyloggers use. An unsigned build will trip SmartScreen on first launch.
+Same caveat as the original: `WH_KEYBOARD_LL` is the same OS primitive that keyloggers use. An unsigned build will trip SmartScreen on first launch. Full breakdown in [docs/antivirus.md](docs/antivirus.md).
 
 ## License
 

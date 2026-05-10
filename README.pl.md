@@ -46,19 +46,19 @@ Wczesny development. Architektura i moduły core (hook, store, keycode, achievem
 |---|---|
 | Keyboard hook (LL) | ✅ |
 | SQLite store + queries | ✅ |
-| Tray icon + menu | ⏳ |
-| Main window + sidebar | ⏳ |
-| Dashboard view | ⏳ |
-| Heatmap view | ⏳ |
-| Stats view | ⏳ |
-| Achievements view | ⏳ |
-| Settings view | ⏳ |
-| Floating widget | ⏳ |
-| Autostart | ⏳ |
-| Eksport JSON | ⏳ |
+| Main window + sidebar | ✅ |
+| Dashboard view | ✅ |
+| Heatmap view | ✅ |
+| Stats view | ✅ |
+| Achievements view | ✅ |
+| Settings view | ✅ |
+| Floating widget | ✅ (compact + full) |
 | i18n PL/EN | ✅ |
 | Light theme | ✅ |
-| Animacje pulsu | ⏳ |
+| Animacje pulsu | ✅ |
+| Tray icon + menu | ⏳ |
+| Autostart | ⏳ |
+| Eksport JSON | ⏳ |
 | Instalator MSI | ⏳ |
 | Code signing | ⏳ |
 

@@ -7,6 +7,7 @@
 // like at this very instant.
 
 pub mod controls;
+pub mod floating_widget;
 pub mod live_pulse;
 pub mod main_window;
 pub mod render;

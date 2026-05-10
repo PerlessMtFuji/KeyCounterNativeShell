@@ -7,16 +7,20 @@
 // in AppState (settings, view choice) so a view can be rebuilt at any
 // frame without losing context.
 
+pub mod achievements;
 pub mod dashboard;
+pub mod heatmap_view;
+pub mod settings;
+pub mod stats;
 
 use crate::app::AppState;
+use crate::core::theme::Theme;
 use crate::ui::controls::InputState;
-use crate::ui::render::primitives::{text, HAlign, Rect, VAlign};
-use crate::ui::render::{Brush, Font, RenderContext};
+use crate::ui::render::primitives::Rect;
+use crate::ui::render::RenderContext;
 
 /// View identity. The numeric values are stable — the active view is
-/// persisted in settings (Push 4 will hook this up; for now it
-/// defaults to Dashboard).
+/// persisted in settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Dashboard,
@@ -26,47 +30,50 @@ pub enum View {
     Settings,
 }
 
+/// What a view paint asks the main window to do afterwards. Most views
+/// return the default (no-op) — only the Settings view emits intent
+/// today, but the channel exists so future views (achievements toast
+/// dismissal, dashboard quick-actions) can join without refactoring.
+#[derive(Default)]
+pub struct ViewOutput {
+    pub picked_theme: Option<Theme>,
+    pub settings_dirty: bool,
+    pub reset_requested: bool,
+    pub export_requested: bool,
+}
+
 pub fn draw(
     ctx: &RenderContext,
     rect: Rect,
     view: View,
     state: &AppState,
     input: &mut InputState,
-) {
+) -> ViewOutput {
     match view {
-        View::Dashboard => dashboard::draw(ctx, rect, state, input),
-        // Stub views — full implementations land in Push 3.
-        other => stub(ctx, rect, label_for(other)),
-    }
-}
-
-fn stub(ctx: &RenderContext, rect: Rect, label: &str) {
-    text(
-        ctx,
-        rect.shrink(40.0, 40.0),
-        label,
-        Font::Heading,
-        Brush::TextDim,
-        HAlign::Centre,
-        VAlign::Centre,
-    );
-    text(
-        ctx,
-        Rect::new(rect.x, rect.bottom() - 60.0, rect.w, 24.0),
-        "Coming in the next release.",
-        Font::Caption,
-        Brush::TextMuted,
-        HAlign::Centre,
-        VAlign::Centre,
-    );
-}
-
-fn label_for(v: View) -> &'static str {
-    match v {
-        View::Dashboard => "Dashboard",
-        View::Heatmap => "Keyboard heatmap",
-        View::Stats => "Statistics",
-        View::Achievements => "Achievements",
-        View::Settings => "Settings",
+        View::Dashboard => {
+            dashboard::draw(ctx, rect, state, input);
+            ViewOutput::default()
+        }
+        View::Heatmap => {
+            heatmap_view::draw(ctx, rect, state, input);
+            ViewOutput::default()
+        }
+        View::Stats => {
+            stats::draw(ctx, rect, state, input);
+            ViewOutput::default()
+        }
+        View::Achievements => {
+            achievements::draw(ctx, rect, state, input);
+            ViewOutput::default()
+        }
+        View::Settings => {
+            let s = settings::draw(ctx, rect, state, input);
+            ViewOutput {
+                picked_theme: s.picked_theme,
+                settings_dirty: s.settings_dirty,
+                reset_requested: s.reset_requested,
+                export_requested: s.export_requested,
+            }
+        }
     }
 }

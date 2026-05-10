@@ -157,7 +157,6 @@ pub fn toggle(
 /// Theme toggle — same as toggle() but with sun / moon glyphs and the
 /// theme-aware label. Convenience because this exact pattern appears
 /// on the sidebar.
-#[allow(dead_code)]
 pub fn theme_toggle(
     ctx: &RenderContext,
     rect: Rect,

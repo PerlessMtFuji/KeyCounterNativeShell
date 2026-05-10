@@ -46,7 +46,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 /// be rebuilt (GPU reset, monitor change, sleep/resume). Not exposed
 /// as a named constant by windows-rs 0.58, so we inline the value
 /// straight from d2derr.h.
-const D2DERR_RECREATE_TARGET: HRESULT = HRESULT(0x8899000Cu32 as i32);
+pub const D2DERR_RECREATE_TARGET: HRESULT = HRESULT(0x8899000Cu32 as i32);
 
 use crate::app::AppState;
 use crate::core::i18n;
@@ -263,12 +263,31 @@ impl Window {
         }
 
         // Active view
-        {
+        let view_out = {
             let ctx = self.ctx.as_ref().unwrap();
-            crate::ui::views::draw(ctx, body_rect, view, &state_clone, &mut self.input);
-        }
+            crate::ui::views::draw(ctx, body_rect, view, &state_clone, &mut self.input)
+        };
 
         self.apply_sidebar_output(sidebar_out);
+        self.apply_view_output(view_out);
+    }
+
+    fn apply_view_output(&mut self, out: crate::ui::views::ViewOutput) {
+        if let Some(theme) = out.picked_theme {
+            i18n::SETTINGS.write().theme = theme;
+            if let Some(ctx) = self.ctx.as_mut() {
+                let _ = ctx.set_theme(theme);
+            }
+        }
+        if out.reset_requested {
+            // Push 4 will surface a confirm dialog; for now do nothing
+            // destructive — log so we know the wire-up works.
+            log::info!("settings: reset requested (Push 4 will land it)");
+        }
+        if out.export_requested {
+            log::info!("settings: export requested (Push 4 will land it)");
+        }
+        // settings_dirty: settings persistence file write lands in Push 4.
     }
 
     fn apply_sidebar_output(&mut self, out: sidebar::SidebarOutput) {
@@ -457,7 +476,11 @@ pub fn run(state: AppState) -> Result<()> {
         let _ = AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPEDWINDOW, false, WINDOW_EX_STYLE(0), dpi);
     }
 
-    // Box the AppState so we can pass it through CREATESTRUCT.lpCreateParams.
+    // Clone the AppState before we move it into the main window's
+    // CREATESTRUCT.lpCreateParams. The clone goes to the floating
+    // widget, which is its own top-level window but rides the same
+    // GetMessageW pump.
+    let widget_state = state.clone();
     let state_box = Box::new(state);
     let state_ptr = Box::into_raw(state_box);
     let hwnd = unsafe {
@@ -481,6 +504,14 @@ pub fn run(state: AppState) -> Result<()> {
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = UpdateWindow(hwnd);
+    }
+
+    // Spawn the floating widget alongside. It rides the same message
+    // pump (GetMessageW dispatches to every window in the thread). A
+    // failure here shouldn't take down the main window — log and
+    // continue.
+    if let Err(e) = crate::ui::floating_widget::spawn(widget_state) {
+        log::warn!("floating widget spawn failed: {e}");
     }
 
     // Standard message loop.
