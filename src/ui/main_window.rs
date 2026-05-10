@@ -36,10 +36,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
     GetWindowLongPtrW, KillTimer, LoadCursorW, PostQuitMessage, RegisterClassExW, SetTimer,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
-    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HCURSOR, HICON, HMENU, IDC_ARROW, MSG, SWP_NOACTIVATE,
-    SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_DPICHANGED,
-    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SIZE, WM_TIMER,
-    WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HCURSOR, HICON, HMENU, IDC_ARROW, MINMAXINFO, MSG,
+    SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_CREATE, WM_DESTROY,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 
 /// HRESULT D2D returns from `EndDraw` when the render target needs to
@@ -66,6 +66,14 @@ const T_LIVE: usize = 2;
 const T_FULL: usize = 3;
 
 const INITIAL_DIPS: (i32, i32) = (1100, 720);
+
+/// Floor on the window's tracking size. Below this the sidebar + top
+/// bar + 4-card dashboard row starts to overlap, so we let the OS clamp
+/// the drag rather than try to gracefully reflow the layout. Tuned to
+/// the widest "must fit" row: sidebar (220) + 4 dashboard cards
+/// (≈ 4 × 160 + 3 × 16) + outer padding ≈ 940. Vertically the sidebar
+/// stack + dashboard hero row + hourly chart wants ≈ 620.
+const MIN_TRACK_DIPS: (i32, i32) = (940, 620);
 
 struct Window {
     hwnd: HWND,
@@ -323,6 +331,33 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
                 let suggested = &*(l.0 as *const RECT);
                 win.handle_dpi(new_dpi, suggested);
                 let _ = InvalidateRect(hwnd, None, false);
+                LRESULT(0)
+            }
+            WM_GETMINMAXINFO => {
+                // Clamp resize at the layout's natural minimum. The
+                // OS gives us a pointer to its own MINMAXINFO to fill
+                // in. We compute the window-coord minimum (i.e.
+                // including the titlebar + borders the current DPI's
+                // theme adds) so the *content* area really gets the
+                // DIPs we asked for.
+                let info = &mut *(l.0 as *mut MINMAXINFO);
+                let dpi = GetDpiForWindow(hwnd).max(96);
+                let scale = dpi as f32 / 96.0;
+                let mut r = RECT {
+                    left: 0,
+                    top: 0,
+                    right: (MIN_TRACK_DIPS.0 as f32 * scale) as i32,
+                    bottom: (MIN_TRACK_DIPS.1 as f32 * scale) as i32,
+                };
+                let _ = AdjustWindowRectExForDpi(
+                    &mut r,
+                    WS_OVERLAPPEDWINDOW,
+                    false,
+                    WINDOW_EX_STYLE(0),
+                    dpi,
+                );
+                info.ptMinTrackSize.x = r.right - r.left;
+                info.ptMinTrackSize.y = r.bottom - r.top;
                 LRESULT(0)
             }
             WM_TIMER => {
