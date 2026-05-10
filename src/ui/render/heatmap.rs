@@ -122,10 +122,11 @@ pub fn draw(
     counts: impl Fn(KeyCode) -> i64,
 ) {
     let aspect = PLATE_COLS / PLATE_ROWS;
-    let (w, h) = if rect.w / rect.h > aspect {
-        (rect.h * aspect, rect.h)
+    // We only need the plate width; height falls out of `unit * PLATE_ROWS`.
+    let w = if rect.w / rect.h > aspect {
+        rect.h * aspect
     } else {
-        (rect.w, rect.w / aspect)
+        rect.w
     };
     let unit = (w / PLATE_COLS).floor();
     let plate_w = unit * PLATE_COLS;
