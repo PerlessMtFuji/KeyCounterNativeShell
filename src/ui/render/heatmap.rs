@@ -11,7 +11,7 @@
 // resolves to a neutral surface tone there).
 
 use super::primitives::{fill_rounded, stroke_rounded, text, HAlign, Rect, VAlign};
-use super::{heat, Brush, Font, RenderContext};
+use super::{create_solid_brush, heat, Brush, Font, RenderContext};
 use crate::core::keycode::KeyCode;
 use crate::core::layouts::{label_for, LayoutId};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
@@ -164,7 +164,7 @@ pub fn draw(
             b: rgba[2],
             a: rgba[3],
         };
-        if let Ok(brush) = unsafe { ctx.target.CreateSolidColorBrush(&color, None) } {
+        if let Ok(brush) = create_solid_brush(&ctx.target, color) {
             let rr = windows::Win32::Graphics::Direct2D::D2D1_ROUNDED_RECT {
                 rect: key_rect.to_d2d(),
                 radiusX: 4.0,
@@ -214,7 +214,7 @@ pub fn legend(ctx: &RenderContext, rect: Rect, max: i64) {
             b: rgba[2],
             a: rgba[3],
         };
-        if let Ok(brush) = unsafe { ctx.target.CreateSolidColorBrush(&color, None) } {
+        if let Ok(brush) = create_solid_brush(&ctx.target, color) {
             let cell = Rect::new(rect.x + i as f32 * step_w, rect.y, step_w + 0.5, rect.h - 14.0);
             unsafe {
                 ctx.target.FillRectangle(&cell.to_d2d(), &brush);

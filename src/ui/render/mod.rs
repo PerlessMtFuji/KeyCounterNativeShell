@@ -258,7 +258,7 @@ impl RenderContext {
                 b: rgba[2],
                 a: rgba[3],
             };
-            let brush = unsafe { self.target.CreateSolidColorBrush(&color, None)? };
+            let brush = create_solid_brush(&self.target, color)?;
             self.brushes[slot as usize] = Some(brush);
         }
         Ok(())
@@ -368,5 +368,30 @@ pub fn rect_to_d2d(r: &RECT) -> windows::Win32::Graphics::Direct2D::Common::D2D_
         top: r.top as f32,
         right: r.right as f32,
         bottom: r.bottom as f32,
+    }
+}
+
+/// `CreateSolidColorBrush` wrapper — windows-rs 0.58's generated impl
+/// on `ID2D1RenderTarget` does not surface this method to dot-syntax
+/// method resolution on the user's toolchain (likely a generic-param
+/// codegen quirk specific to factory methods that return a new COM
+/// interface). The COM entry point itself is unchanged, so we dispatch
+/// through the vtable directly. Behaviour and HRESULT contract match
+/// the documented method exactly.
+pub fn create_solid_brush(
+    target: &ID2D1RenderTarget,
+    color: D2D1_COLOR_F,
+) -> Result<ID2D1SolidColorBrush> {
+    unsafe {
+        let vt = target.vtable();
+        let mut raw: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = (vt.CreateSolidColorBrush)(
+            target.as_raw(),
+            &color as *const _,
+            std::ptr::null(),
+            &mut raw as *mut *mut _,
+        );
+        hr.ok()?;
+        Ok(ID2D1SolidColorBrush::from_raw(raw))
     }
 }

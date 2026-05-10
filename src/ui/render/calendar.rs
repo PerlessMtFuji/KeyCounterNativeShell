@@ -9,7 +9,7 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDate, Utc, Weekday};
 
 use super::primitives::{fill_rounded, text, HAlign, Rect, VAlign};
-use super::{heat, Brush, Font, RenderContext};
+use super::{create_solid_brush, heat, Brush, Font, RenderContext};
 use crate::core::store::DayTotal;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
@@ -132,7 +132,7 @@ fn draw_cell(ctx: &RenderContext, rect: Rect, rgba: [f32; 4]) {
         b: rgba[2],
         a: rgba[3],
     };
-    if let Ok(brush) = unsafe { ctx.target.CreateSolidColorBrush(&color, None) } {
+    if let Ok(brush) = create_solid_brush(&ctx.target, color) {
         let rr = windows::Win32::Graphics::Direct2D::D2D1_ROUNDED_RECT {
             rect: rect.to_d2d(),
             radiusX: 2.0,

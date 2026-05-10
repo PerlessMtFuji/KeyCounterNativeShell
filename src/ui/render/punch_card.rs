@@ -5,7 +5,7 @@
 // Colour is the heat ramp against the per-grid maximum.
 
 use super::primitives::{text, HAlign, Rect, VAlign};
-use super::{heat, Brush, Font, RenderContext};
+use super::{create_solid_brush, heat, Brush, Font, RenderContext};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 const DAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -89,7 +89,7 @@ fn draw_cell(ctx: &RenderContext, rect: Rect, rgba: [f32; 4]) {
         b: rgba[2],
         a: rgba[3],
     };
-    if let Ok(brush) = unsafe { ctx.target.CreateSolidColorBrush(&color, None) } {
+    if let Ok(brush) = create_solid_brush(&ctx.target, color) {
         let rr = windows::Win32::Graphics::Direct2D::D2D1_ROUNDED_RECT {
             rect: rect.to_d2d(),
             radiusX: 2.0,
