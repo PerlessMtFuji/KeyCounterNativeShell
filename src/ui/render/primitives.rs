@@ -186,7 +186,7 @@ pub fn card(ctx: &RenderContext, rect: Rect, radius: f32) {
 }
 
 pub fn fill_circle(ctx: &RenderContext, cx: f32, cy: f32, r: f32, b: Brush) {
-    let ellipse = windows::Win32::Graphics::Direct2D::Common::D2D1_ELLIPSE {
+    let ellipse = windows::Win32::Graphics::Direct2D::D2D1_ELLIPSE {
         point: D2D_POINT_2F { x: cx, y: cy },
         radiusX: r,
         radiusY: r,
@@ -197,7 +197,7 @@ pub fn fill_circle(ctx: &RenderContext, cx: f32, cy: f32, r: f32, b: Brush) {
 }
 
 pub fn stroke_circle(ctx: &RenderContext, cx: f32, cy: f32, r: f32, b: Brush, width: f32) {
-    let ellipse = windows::Win32::Graphics::Direct2D::Common::D2D1_ELLIPSE {
+    let ellipse = windows::Win32::Graphics::Direct2D::D2D1_ELLIPSE {
         point: D2D_POINT_2F { x: cx, y: cy },
         radiusX: r,
         radiusY: r,

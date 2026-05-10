@@ -22,25 +22,31 @@ use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use windows::core::{w, PCWSTR};
+use windows::core::{w, HRESULT, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Direct2D::D2DERR_RECREATE_TARGET;
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, InvalidateRect, UpdateWindow, HBRUSH, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
-    GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    AdjustWindowRectExForDpi, GetDpiForWindow, SetProcessDpiAwarenessContext,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectExForDpi, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
-    GetMessageW, GetWindowLongPtrW, KillTimer, LoadCursorW, PostQuitMessage, RegisterClassExW,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, CREATESTRUCTW,
-    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HCURSOR, HICON, HMENU, IDC_ARROW, MSG,
-    SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_CREATE, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SIZE,
-    WM_TIMER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
+    GetWindowLongPtrW, KillTimer, LoadCursorW, PostQuitMessage, RegisterClassExW, SetTimer,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
+    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HCURSOR, HICON, HMENU, IDC_ARROW, MSG, SWP_NOACTIVATE,
+    SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SIZE, WM_TIMER,
+    WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
+
+/// HRESULT D2D returns from `EndDraw` when the render target needs to
+/// be rebuilt (GPU reset, monitor change, sleep/resume). Not exposed
+/// as a named constant by windows-rs 0.58, so we inline the value
+/// straight from d2derr.h.
+const D2DERR_RECREATE_TARGET: HRESULT = HRESULT(0x8899000Cu32 as i32);
 
 use crate::app::AppState;
 use crate::core::i18n;

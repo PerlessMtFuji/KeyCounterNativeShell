@@ -18,14 +18,14 @@ pub mod calendar;
 pub mod punch_card;
 
 use anyhow::Result;
-use windows::core::w;
+use windows::core::{w, Interface};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_SIZE_U,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1CreateFactory, ID2D1Factory1, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+    D2D1CreateFactory, ID2D1Factory1, ID2D1HwndRenderTarget, ID2D1RenderTarget,
+    ID2D1SolidColorBrush, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
     D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
     D2D1_RENDER_TARGET_USAGE_NONE,
@@ -98,10 +98,20 @@ const FONT_COUNT: usize = 9;
 /// Per-window render resources. Owned by the main_window struct, lives
 /// from first paint until the window is destroyed (or until D2D asks
 /// for a rebuild).
+///
+/// Two render-target handles point at the same underlying D2D object:
+/// `hwnd_target` is the concrete `ID2D1HwndRenderTarget` (needed for
+/// `Resize` / window-state checks), and `target` is the upcast
+/// `ID2D1RenderTarget` view used by every drawing primitive. We keep
+/// both because windows-rs 0.58 doesn't expose parent-interface
+/// methods via `Deref` for generic-typed methods like
+/// `CreateSolidColorBrush`, so callers that need those go through the
+/// upcast.
 pub struct RenderContext {
     pub d2d: ID2D1Factory1,
     pub dwrite: IDWriteFactory,
-    pub target: ID2D1HwndRenderTarget,
+    pub hwnd_target: ID2D1HwndRenderTarget,
+    pub target: ID2D1RenderTarget,
     pub brushes: [Option<ID2D1SolidColorBrush>; BRUSH_COUNT],
     pub fonts: [Option<IDWriteTextFormat>; FONT_COUNT],
     pub theme: Theme,
@@ -140,11 +150,16 @@ impl RenderContext {
             },
             presentOptions: D2D1_PRESENT_OPTIONS_NONE,
         };
-        let target = unsafe { d2d.CreateHwndRenderTarget(&render_props, &hwnd_props)? };
+        let hwnd_target =
+            unsafe { d2d.CreateHwndRenderTarget(&render_props, &hwnd_props)? };
+        // QueryInterface upcast — same underlying D2D object, different
+        // view of the methods. In practice a refcount bump.
+        let target: ID2D1RenderTarget = hwnd_target.cast()?;
 
         let mut ctx = Self {
             d2d,
             dwrite,
+            hwnd_target,
             target,
             brushes: std::array::from_fn(|_| None),
             fonts: std::array::from_fn(|_| None),
@@ -160,7 +175,7 @@ impl RenderContext {
     pub fn resize(&mut self, w: u32, h: u32) -> Result<()> {
         self.size_px = (w.max(1), h.max(1));
         unsafe {
-            self.target.Resize(&D2D_SIZE_U {
+            self.hwnd_target.Resize(&D2D_SIZE_U {
                 width: self.size_px.0,
                 height: self.size_px.1,
             })?;
