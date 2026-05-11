@@ -208,8 +208,31 @@ impl Window {
             }
             return;
         }
+        // Invalidate only the top-bar pulse strip — the dashboard,
+        // sidebar, and the rest of the body are unchanged. Combined
+        // with D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS and the partial
+        // paint path in `paint()` below, the per-tick cost drops from
+        // "redraw 60-key heatmap + every chart + every label" to
+        // "fill one 56-DIP strip plus the live-pulse draw calls".
+        let scale = self.ctx.as_ref().map(|c| c.dpi_scale).unwrap_or(1.0);
+        let mut client = RECT::default();
         unsafe {
-            let _ = InvalidateRect(self.hwnd, None, false);
+            let _ = GetClientRect(self.hwnd, &mut client);
+        }
+        let sb_w = (sidebar::WIDTH * scale) as i32;
+        let tb_h = (live_pulse::HEIGHT * scale) as i32;
+        // RECT semantics: right/bottom are exclusive in Win32 paint
+        // structs. We deliberately clamp to the client rect because a
+        // dirty rect extending past the window edge would be coalesced
+        // with later full-window invalidations and force a full paint.
+        let band = RECT {
+            left: sb_w,
+            top: 0,
+            right: client.right.max(sb_w + 1),
+            bottom: tb_h,
+        };
+        unsafe {
+            let _ = InvalidateRect(self.hwnd, Some(&band), false);
         }
     }
 
@@ -267,23 +290,83 @@ impl Window {
         let mut ps = PAINTSTRUCT::default();
         let _hdc = unsafe { BeginPaint(self.hwnd, &mut ps) };
 
+        // Classify the WM_PAINT update region. If everything dirty
+        // sits inside the top-bar strip we can do a partial repaint
+        // and leave the dashboard pixels alone (RETAIN_CONTENTS on the
+        // render target preserves them between Present calls).
+        let scale = self.ctx.as_ref().unwrap().dpi_scale;
+        let sb_w = (sidebar::WIDTH * scale) as i32;
+        let tb_h = (live_pulse::HEIGHT * scale) as i32;
+        let dirty = ps.rcPaint;
+        let pulse_only = dirty.left >= sb_w
+            && dirty.top >= 0
+            && dirty.bottom <= tb_h
+            && dirty.right > dirty.left
+            && dirty.bottom > dirty.top;
+
         unsafe {
             self.ctx.as_ref().unwrap().target.BeginDraw();
         }
-        self.draw_frame();
+        if pulse_only {
+            self.draw_top_bar_only();
+        } else {
+            self.draw_frame();
+        }
         let need_recreate = {
             let ctx = self.ctx.as_ref().unwrap();
             let result = unsafe { ctx.target.EndDraw(None, None) };
-            match result {
-                Err(e) if e.code() == D2DERR_RECREATE_TARGET => true,
-                _ => false,
-            }
+            matches!(result, Err(e) if e.code() == D2DERR_RECREATE_TARGET)
         };
         if need_recreate {
             self.ctx = None;
         }
         unsafe {
             let _ = EndPaint(self.hwnd, &ps);
+        }
+    }
+
+    /// Repaint just the top-bar pulse strip. Called when WM_PAINT's
+    /// dirty rect tells us the dashboard / sidebar pixels haven't
+    /// changed since the last full paint — typically a 30 FPS ripple
+    /// animation tick while the user types.
+    ///
+    /// Caller already opened a BeginDraw scope. We push an axis-aligned
+    /// clip so any antialias bleed from `live_pulse::draw` can't smudge
+    /// the cached pixels below; we do NOT call `clear()` because that
+    /// would wipe the retained back-buffer.
+    fn draw_top_bar_only(&mut self) {
+        let (scale, canvas) = {
+            let ctx = self.ctx.as_ref().unwrap();
+            let (w_px, h_px) = ctx.size_px;
+            (ctx.dpi_scale, Rect::new(0.0, 0.0, w_px as f32, h_px as f32))
+        };
+        let sb_w = sidebar::WIDTH * scale;
+        let (_, rest) = canvas.split_left(sb_w);
+        let tb_h = live_pulse::HEIGHT * scale;
+        let (tb_rect, _) = rest.split_top(tb_h);
+
+        let last_event_ms = self.last_event_ms;
+        let now_ms = self.now_ms();
+        let snap = self.state.snapshot.read();
+        let pulse = self.state.pulse.read();
+        let ctx = self.ctx.as_ref().unwrap();
+        unsafe {
+            ctx.target.PushAxisAlignedClip(
+                &tb_rect.to_d2d(),
+                windows::Win32::Graphics::Direct2D::D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            );
+        }
+        live_pulse::draw(
+            ctx,
+            tb_rect,
+            &pulse,
+            &snap.live,
+            snap.lifetime,
+            last_event_ms,
+            now_ms,
+        );
+        unsafe {
+            ctx.target.PopAxisAlignedClip();
         }
     }
 

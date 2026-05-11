@@ -26,7 +26,7 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     D2D1CreateFactory, ID2D1Factory1, ID2D1HwndRenderTarget, ID2D1RenderTarget,
     ID2D1SolidColorBrush, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
+    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS,
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
     D2D1_RENDER_TARGET_USAGE_NONE,
 };
@@ -148,7 +148,13 @@ impl RenderContext {
                 width: size_px.0.max(1),
                 height: size_px.1.max(1),
             },
-            presentOptions: D2D1_PRESENT_OPTIONS_NONE,
+            // RETAIN_CONTENTS: the back-buffer survives Present, so a
+            // partial repaint (e.g. the pulse animation invalidating
+            // just the top bar) doesn't have to redraw the dashboard /
+            // sidebar pixels. Without this the next BeginDraw shows
+            // undefined contents in the un-painted regions and we'd
+            // have to repaint the whole frame on every animation tick.
+            presentOptions: D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS,
         };
         let hwnd_target =
             unsafe { d2d.CreateHwndRenderTarget(&render_props, &hwnd_props)? };
