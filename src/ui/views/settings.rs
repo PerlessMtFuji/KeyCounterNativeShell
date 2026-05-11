@@ -34,19 +34,28 @@ pub struct ViewOutput {
     pub reset_requested: bool,
     pub export_requested: bool,
     pub autostart_changed: bool,
+    /// Set when the user flipped the floating-widget visibility from
+    /// the settings panel. The owning window applies the new state to
+    /// the widget HWND outside the paint pass.
+    pub widget_visibility_changed: Option<bool>,
 }
 
-// Row heights — see module comment.
-const ROW_TOGGLE_H: f32 = 56.0;
-const ROW_SEG_H: f32 = 76.0;
-const ROW_SEG_NOHINT_H: f32 = 60.0;
-const ROW_SLIDER_H: f32 = 76.0;
-const ROW_DATA_H: f32 = 54.0;
-const ROW_ABOUT_H: f32 = 22.0;
+// Row heights — see module comment. Sized for the new 12-DIP Caption
+// hint face (was 11) plus a generous gap so descenders never kiss the
+// control below. The old budget (e.g. 56 DIPs for a toggle row) put
+// label + hint at 6+18 and 26+22 which collided with the 22-DIP toggle
+// centred at y = 17..39 when row heights were tight; we now reserve a
+// dedicated band per element.
+const ROW_TOGGLE_H: f32 = 68.0;
+const ROW_SEG_H: f32 = 92.0;
+const ROW_SEG_NOHINT_H: f32 = 70.0;
+const ROW_SLIDER_H: f32 = 92.0;
+const ROW_DATA_H: f32 = 64.0;
+const ROW_ABOUT_H: f32 = 26.0;
 
-const SECTION_TITLE_H: f32 = 24.0;
-const SECTION_PAD: f32 = 14.0;
-const SECTION_GAP: f32 = 14.0;
+const SECTION_TITLE_H: f32 = 28.0;
+const SECTION_PAD: f32 = 16.0;
+const SECTION_GAP: f32 = 16.0;
 const COL_GAP: f32 = 18.0;
 
 pub fn draw(
@@ -116,8 +125,14 @@ pub fn draw(
     let right_x = if two_col { body.x + col_w + COL_GAP } else { body.x };
     let cursor = if two_col { &mut right_y } else { &mut left_y };
 
-    let widget_h =
-        SECTION_TITLE_H + SECTION_PAD * 2.0 + ROW_SEG_H + ROW_SLIDER_H + ROW_TOGGLE_H;
+    // Widget section now also hosts a "Show floating widget" toggle so
+    // the user can hide/show it without going through the tray menu.
+    let widget_h = SECTION_TITLE_H
+        + SECTION_PAD * 2.0
+        + ROW_TOGGLE_H
+        + ROW_SEG_H
+        + ROW_SLIDER_H
+        + ROW_TOGGLE_H;
     draw_widget_section(
         ctx,
         Rect::new(right_x, *cursor, col_w, widget_h),
@@ -142,7 +157,27 @@ pub fn draw(
     out.reset_requested = OUT_RESET.with(|c| c.take());
     out.export_requested = OUT_EXPORT.with(|c| c.take());
     out.autostart_changed = OUT_AUTOSTART.with(|c| c.take());
+    out.widget_visibility_changed = OUT_WIDGET_VIS.with(|c| c.take());
+
+    // Detect any persisted-settings field that changed during this
+    // paint and ask the owner to write it to disk so the user's
+    // tweaks survive a crash, not just a clean exit.
+    let after = i18n::SETTINGS.read().clone();
+    if !settings_equal(&current, &after) {
+        out.settings_dirty = true;
+    }
     out
+}
+
+fn settings_equal(a: &i18n::Settings, b: &i18n::Settings) -> bool {
+    a.lang == b.lang
+        && a.theme == b.theme
+        && a.layout == b.layout
+        && a.widget_visible == b.widget_visible
+        && a.widget_compact == b.widget_compact
+        && a.widget_snap == b.widget_snap
+        && a.widget_opacity == b.widget_opacity
+        && a.autostart == b.autostart
 }
 
 thread_local! {
@@ -150,6 +185,7 @@ thread_local! {
     static OUT_RESET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static OUT_EXPORT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static OUT_AUTOSTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static OUT_WIDGET_VIS: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +331,26 @@ fn draw_widget_section(
     let inner = section_frame(ctx, rect, i18n::t("nav.widget"));
     let mut y = inner.y;
 
+    // Visibility toggle — also persisted via Settings::widget_visible,
+    // mirrors the tray-menu "Show widget" item.
+    let r = Rect::new(inner.x, y, inner.w, ROW_TOGGLE_H);
+    let was_visible = current.widget_visible;
+    row_toggle(
+        ctx,
+        r,
+        i18n::t("widget.visibleLabel"),
+        i18n::t("widget.visibleHint"),
+        was_visible,
+        input,
+        |new| {
+            if new != was_visible {
+                i18n::SETTINGS.write().widget_visible = new;
+                OUT_WIDGET_VIS.with(|c| c.set(Some(new)));
+            }
+        },
+    );
+    y += ROW_TOGGLE_H;
+
     let mode_idx = if current.widget_compact { 1 } else { 0 };
     let r = Rect::new(inner.x, y, inner.w, ROW_SEG_H);
     row_segmented(
@@ -361,7 +417,7 @@ fn draw_data_section(
     let r = Rect::new(inner.x, y, inner.w, ROW_DATA_H);
     text(
         ctx,
-        Rect::new(r.x, r.y + 6.0, r.w, 18.0),
+        Rect::new(r.x, r.y + 8.0, r.w, 20.0),
         i18n::t("settings.dbPath"),
         Font::Body,
         Brush::Text,
@@ -371,7 +427,7 @@ fn draw_data_section(
     let path = state.db_path.display().to_string();
     text(
         ctx,
-        Rect::new(r.x, r.y + 26.0, r.w, 22.0),
+        Rect::new(r.x, r.y + 32.0, r.w, r.h - 36.0),
         &path,
         Font::Caption,
         Brush::TextMuted,
@@ -451,11 +507,14 @@ fn row_toggle<F: FnOnce(bool)>(
     input: &mut InputState,
     on_change: F,
 ) {
-    let toggle_w = 44.0;
-    let text_w = rect.w - toggle_w - 12.0;
+    let toggle_w = 48.0;
+    // Leave 20 DIPs of breathing room between the text block and the
+    // toggle so Polish two-word labels (e.g. "Wstrzymaj zliczanie") have
+    // room before the knob.
+    let text_w = (rect.w - toggle_w - 20.0).max(0.0);
     text(
         ctx,
-        Rect::new(rect.x, rect.y + 6.0, text_w, 18.0),
+        Rect::new(rect.x, rect.y + 8.0, text_w, 20.0),
         label,
         Font::Body,
         Brush::Text,
@@ -465,7 +524,7 @@ fn row_toggle<F: FnOnce(bool)>(
     if !hint.is_empty() {
         text(
             ctx,
-            Rect::new(rect.x, rect.y + 26.0, text_w, 22.0),
+            Rect::new(rect.x, rect.y + 32.0, text_w, rect.h - 36.0),
             hint,
             Font::Caption,
             Brush::TextMuted,
@@ -473,7 +532,12 @@ fn row_toggle<F: FnOnce(bool)>(
             VAlign::Top,
         );
     }
-    let toggle_rect = Rect::new(rect.right() - toggle_w, rect.y + (rect.h - 22.0) * 0.5, toggle_w, 22.0);
+    let toggle_rect = Rect::new(
+        rect.right() - toggle_w,
+        rect.y + (rect.h - 24.0) * 0.5,
+        toggle_w,
+        24.0,
+    );
     let (new_value, _) = toggle(ctx, toggle_rect, value, input);
     if new_value != value {
         on_change(new_value);
@@ -493,7 +557,7 @@ fn row_slider<F: FnOnce(u8)>(
 ) {
     text(
         ctx,
-        Rect::new(rect.x, rect.y + 4.0, rect.w, 18.0),
+        Rect::new(rect.x, rect.y + 6.0, rect.w, 20.0),
         label,
         Font::Body,
         Brush::Text,
@@ -503,7 +567,7 @@ fn row_slider<F: FnOnce(u8)>(
     if !hint.is_empty() {
         text(
             ctx,
-            Rect::new(rect.x, rect.y + 22.0, rect.w, 18.0),
+            Rect::new(rect.x, rect.y + 30.0, rect.w, rect.h - 56.0),
             hint,
             Font::Caption,
             Brush::TextMuted,
@@ -511,16 +575,21 @@ fn row_slider<F: FnOnce(u8)>(
             VAlign::Top,
         );
     }
-    let track_y = rect.bottom() - 22.0;
-    let value_w = 54.0;
-    let track_rect = Rect::new(rect.x, track_y, rect.w - value_w, 20.0);
+    // The slider sits in a 22-DIP band so the visible thumb fills the
+    // hit rect — previously the hit rect was 20 DIPs but the visual
+    // thumb was a 14-diameter circle inside it, so clicks a few DIPs
+    // above/below the painted thumb still moved the slider.
+    let track_h = 22.0;
+    let track_y = rect.bottom() - track_h - 2.0;
+    let value_w = 60.0;
+    let track_rect = Rect::new(rect.x, track_y, rect.w - value_w - 8.0, track_h);
     let (new_value, _) = slider(ctx, track_rect, value, min, max, input);
     if new_value != value {
         on_change(new_value);
     }
     text(
         ctx,
-        Rect::new(rect.right() - value_w, track_y, value_w, 20.0),
+        Rect::new(rect.right() - value_w, track_y, value_w, track_h),
         &format!("{}%", new_value),
         Font::Body,
         Brush::TextDim,
@@ -541,7 +610,7 @@ fn row_segmented<F: FnOnce(usize)>(
 ) {
     text(
         ctx,
-        Rect::new(rect.x, rect.y + 2.0, rect.w, 18.0),
+        Rect::new(rect.x, rect.y + 6.0, rect.w, 20.0),
         label,
         Font::Body,
         Brush::Text,
@@ -551,7 +620,7 @@ fn row_segmented<F: FnOnce(usize)>(
     if !hint.is_empty() {
         text(
             ctx,
-            Rect::new(rect.x, rect.y + 20.0, rect.w, 18.0),
+            Rect::new(rect.x, rect.y + 30.0, rect.w, rect.h - 70.0),
             hint,
             Font::Caption,
             Brush::TextMuted,
@@ -559,18 +628,22 @@ fn row_segmented<F: FnOnce(usize)>(
             VAlign::Top,
         );
     }
-    let seg_h = 30.0;
-    let seg_rect = Rect::new(rect.x, rect.bottom() - seg_h - 2.0, rect.w, seg_h);
+    let seg_h = 34.0;
+    let seg_rect = Rect::new(rect.x, rect.bottom() - seg_h - 4.0, rect.w, seg_h);
     let n = options.len().max(1);
     let cell_w = seg_rect.w / n as f32;
-    fill_rounded(ctx, seg_rect, 8.0, Brush::SurfaceAlt);
+    fill_rounded(ctx, seg_rect, 9.0, Brush::SurfaceAlt);
     for (i, opt) in options.iter().enumerate() {
         let cell = Rect::new(seg_rect.x + i as f32 * cell_w, seg_rect.y, cell_w, seg_rect.h);
+        // Visual = cell.shrink(2, 2); hit area also shrinks so that
+        // clicks landing in the 2-DIP "gutter" between adjacent cells
+        // don't bleed into the neighbour. Matches what the user sees.
+        let visual = cell.shrink(2.0, 2.0);
         let active = i == current;
         if active {
-            fill_rounded(ctx, cell.shrink(2.0, 2.0), 6.0, Brush::Accent);
-        } else if input.hit(cell) {
-            fill_rounded(ctx, cell.shrink(2.0, 2.0), 6.0, Brush::SurfaceHover);
+            fill_rounded(ctx, visual, 7.0, Brush::Accent);
+        } else if input.hit(visual) {
+            fill_rounded(ctx, visual, 7.0, Brush::SurfaceHover);
         }
         text(
             ctx,
@@ -581,7 +654,7 @@ fn row_segmented<F: FnOnce(usize)>(
             HAlign::Centre,
             VAlign::Centre,
         );
-        if input.consume_click(cell) && i != current {
+        if input.consume_click(visual) && i != current {
             PENDING_SEG.with(|c| c.set(Some(i)));
         }
     }
@@ -604,11 +677,11 @@ fn row_button<F: FnOnce()>(
     input: &mut InputState,
     on_click: F,
 ) {
-    let btn_w = 116.0;
-    let text_w = rect.w - btn_w - 12.0;
+    let btn_w = 124.0;
+    let text_w = (rect.w - btn_w - 20.0).max(0.0);
     text(
         ctx,
-        Rect::new(rect.x, rect.y + 6.0, text_w, 18.0),
+        Rect::new(rect.x, rect.y + 8.0, text_w, 20.0),
         label,
         Font::Body,
         Brush::Text,
@@ -618,7 +691,7 @@ fn row_button<F: FnOnce()>(
     if !hint.is_empty() {
         text(
             ctx,
-            Rect::new(rect.x, rect.y + 26.0, text_w, 22.0),
+            Rect::new(rect.x, rect.y + 32.0, text_w, rect.h - 36.0),
             hint,
             Font::Caption,
             Brush::TextMuted,
@@ -626,7 +699,7 @@ fn row_button<F: FnOnce()>(
             VAlign::Top,
         );
     }
-    let btn_rect = Rect::new(rect.right() - btn_w, rect.y + (rect.h - 30.0) * 0.5, btn_w, 30.0);
+    let btn_rect = Rect::new(rect.right() - btn_w, rect.y + (rect.h - 34.0) * 0.5, btn_w, 34.0);
     if button(ctx, btn_rect, btn_label, style, input).clicked {
         on_click();
     }

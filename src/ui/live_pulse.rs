@@ -8,7 +8,8 @@
 // the palette's pulse colour rather than caching another brush slot,
 // because the alpha varies smoothly across frames.
 
-use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
+use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_POINT_2F};
+use windows::Win32::Graphics::Direct2D::D2D1_ELLIPSE;
 
 use crate::core::stats::PulseHistory;
 use crate::ui::render::primitives::{
@@ -19,6 +20,16 @@ use crate::core::i18n;
 use crate::core::store::LiveSnapshot;
 
 pub const HEIGHT: f32 = 56.0;
+
+/// One ripple completes its travel from the centre dot out to MAX_R in
+/// this many ms. Two ripples are spawned half a period out of phase so
+/// the visual cadence stays continuous while the user types.
+const RIPPLE_PERIOD_MS: f32 = 1100.0;
+/// After this many ms of typing silence the ripples stop spawning. The
+/// dot itself stays visible — only the wave halts.
+const RIPPLE_TRAIL_MS: i64 = 1400;
+const RIPPLE_INNER_R: f32 = 7.0;
+const RIPPLE_OUTER_R: f32 = 22.0;
 
 pub fn draw(
     ctx: &RenderContext,
@@ -40,44 +51,86 @@ pub fn draw(
         1.0,
     );
 
-    // Pulse dot — solid 5.5 px core + an alpha halo that breathes out
-    // on every keystroke. The 900 ms window matches PULSE_GLOW_MS; we
-    // shape the decay with an ease-out cubic (1-(1-t)^3) so the impact
-    // hits fast and the tail falls off smoothly, the way the original
-    // CSS animation did.
+    // Wave-style pulse indicator.
+    //
+    // The previous version drew a bright orange halo that solid-filled
+    // the dot's surroundings while the user typed; in steady-state
+    // typing the halo never had a chance to decay and just sat as a
+    // permanent ring around the dot. We replace it with two concentric
+    // stroked ripples that travel outward on a continuous schedule. As
+    // long as a keystroke landed within RIPPLE_TRAIL_MS the rings keep
+    // expanding from the centre and fading; once the user stops typing
+    // the rings finish their current pass and the dot rests alone.
+    //
+    // Colour: accent (the same blue/teal as the rest of the UI) instead
+    // of pulse-orange — feels less alarmy and matches the KPM digits.
     let age = (now_ms - last_event_ms).max(0);
-    let glow_window: i64 = 900;
-    let t = (1.0 - (age as f32 / glow_window as f32)).clamp(0.0, 1.0);
-    let ease = 1.0 - (1.0 - t).powi(3);
     let pad = 18.0;
     let dot_x = rect.x + pad + 8.0;
     let dot_y = rect.y + rect.h * 0.5;
-    // Soft halo first — one-shot brush at 35 % alpha × ease. Direct2D
-    // brush creation is cheap (≈ µs); we'd cache if this loop ran 60
-    // times per frame, but it doesn't.
-    if ease > 0.02 {
-        let p = ctx.palette().pulse;
-        let halo_color = D2D1_COLOR_F {
-            r: p[0],
-            g: p[1],
-            b: p[2],
-            a: 0.35 * ease,
+
+    let active = age < RIPPLE_TRAIL_MS;
+    if active {
+        // Continuous time-based phase so the two rings stay locked to
+        // their offsets even across keystrokes. We restart the clock at
+        // the last event so the first ring after a long pause emerges
+        // cleanly from the centre instead of mid-flight.
+        let t = (age as f32 / RIPPLE_PERIOD_MS).max(0.0);
+        // Fade the *spawn* amplitude as the trail nears its end so the
+        // ripples don't pop off when the timer cuts.
+        let trail_fade = {
+            let f = 1.0 - (age as f32 / RIPPLE_TRAIL_MS as f32).clamp(0.0, 1.0);
+            // Ease out cubic so the tail looks like a deliberate wind-down
+            // rather than a linear ramp.
+            1.0 - (1.0 - f).powi(3)
         };
-        if let Ok(halo) = create_solid_brush(&ctx.target, halo_color) {
-            let ellipse = windows::Win32::Graphics::Direct2D::D2D1_ELLIPSE {
-                point: windows::Win32::Graphics::Direct2D::Common::D2D_POINT_2F {
-                    x: dot_x,
-                    y: dot_y,
-                },
-                radiusX: 8.0 + 14.0 * ease,
-                radiusY: 8.0 + 14.0 * ease,
+        let p = ctx.palette().accent;
+        for offset in [0.0_f32, 0.5] {
+            let phase = (t + offset).fract();
+            // Skip the very first sliver — it'd render a hairline
+            // exactly on top of the dot.
+            if phase < 0.02 {
+                continue;
+            }
+            let radius = RIPPLE_INNER_R + (RIPPLE_OUTER_R - RIPPLE_INNER_R) * phase;
+            // Quadratic alpha decay — gives a soft tail without
+            // depending on D2D blur filters.
+            let alpha = (1.0 - phase).powi(2) * 0.55 * trail_fade;
+            if alpha < 0.02 {
+                continue;
+            }
+            let color = D2D1_COLOR_F {
+                r: p[0],
+                g: p[1],
+                b: p[2],
+                a: alpha,
             };
-            unsafe {
-                ctx.target.FillEllipse(&ellipse, &halo);
+            if let Ok(brush) = create_solid_brush(&ctx.target, color) {
+                let ellipse = D2D1_ELLIPSE {
+                    point: D2D_POINT_2F { x: dot_x, y: dot_y },
+                    radiusX: radius,
+                    radiusY: radius,
+                };
+                // 1.5-DIP stroke reads as a single clean line at every
+                // DPI we render at; thicker rings look heavy at 200 %.
+                unsafe {
+                    ctx.target.DrawEllipse(&ellipse, &brush, 1.5, None);
+                }
             }
         }
     }
-    fill_circle(ctx, dot_x, dot_y, 5.5, Brush::Pulse);
+
+    // Centre dot — accent-coloured. The fill swaps to accent_strong
+    // while a keystroke is "fresh" (≤ 220 ms) for a subtle confirmation
+    // flash, without the old harsh orange.
+    let fresh = age < 220;
+    fill_circle(
+        ctx,
+        dot_x,
+        dot_y,
+        4.5,
+        if fresh { Brush::AccentStrong } else { Brush::Accent },
+    );
 
     // KPM block — rolling 60 s sliding window from PulseHistory.
     let kpm = pulse.kpm();

@@ -266,25 +266,35 @@ impl RenderContext {
 
     fn build_fonts(&mut self) -> Result<()> {
         let s = self.dpi_scale;
-        let specs: [(Font, f32, _, _); FONT_COUNT] = [
-            (Font::Body, 14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false),
-            (Font::BodyStrong, 14.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
-            (Font::Caption, 11.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false),
-            (Font::CardLabel, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, true),
-            (Font::Display, 32.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
-            (Font::Nav, 14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false),
-            (Font::Heading, 18.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
-            (Font::LiveKpm, 22.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
+        // Per-slot family: Segoe UI Variable ships with Windows 11 and
+        // gives the modern, friendlier look the old "Segoe UI" lacks.
+        // DirectWrite silently substitutes back to Segoe UI on Win10 if
+        // the Variable family isn't present, so we don't need a manual
+        // fallback table. We split body vs display so glyph hinting
+        // matches the size — Microsoft's variable design ships separate
+        // optical sizes for "Text" and "Display".
+        let body_family = w!("Segoe UI Variable Text");
+        let display_family = w!("Segoe UI Variable Display");
+        let specs: [(Font, f32, _, _, bool); FONT_COUNT] = [
+            (Font::Body, 14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false, false),
+            (Font::BodyStrong, 14.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false, false),
+            (Font::Caption, 12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false, false),
+            (Font::CardLabel, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, true, false),
+            (Font::Display, 34.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false, true),
+            (Font::Nav, 14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false, false),
+            (Font::Heading, 20.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false, true),
+            (Font::LiveKpm, 24.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false, true),
             // Glyph: heatmap key labels. Semibold + larger so the
             // letter survives both heat-tinted backgrounds and a 40-DIP
             // key cell; the old 9 px Normal vanished into the bright
             // pink end of the heat ramp.
-            (Font::Glyph, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false),
+            (Font::Glyph, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false, false),
         ];
-        for (slot, size, weight, _uppercase) in specs {
+        for (slot, size, weight, _uppercase, is_display) in specs {
+            let family = if is_display { display_family } else { body_family };
             let format = unsafe {
                 self.dwrite.CreateTextFormat(
-                    w!("Segoe UI"),
+                    family,
                     None,
                     weight,
                     DWRITE_FONT_STYLE_NORMAL,
@@ -318,7 +328,7 @@ pub fn make_text_format(
 ) -> Result<IDWriteTextFormat> {
     let format = unsafe {
         dwrite.CreateTextFormat(
-            w!("Segoe UI"),
+            w!("Segoe UI Variable Text"),
             None,
             windows::Win32::Graphics::DirectWrite::DWRITE_FONT_WEIGHT(weight as i32),
             DWRITE_FONT_STYLE_NORMAL,

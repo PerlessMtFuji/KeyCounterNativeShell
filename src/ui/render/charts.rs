@@ -43,10 +43,13 @@ pub fn top_keys(
     // minimum readable height (≥ body font cap) and a comfortable max.
     // If even at the floor we'd overflow the card, render only as many
     // rows as fit — clipping mid-bar looks worse than truncating.
-    let row_h = (rect.h / want as f32).clamp(18.0, 28.0);
+    // 22 DIPs minimum so the 14 px Body face (≈ 19 DIPs line height)
+    // clears the row below; the old 18 DIPs let descenders kiss the
+    // label of the next row in the top-20 list.
+    let row_h = (rect.h / want as f32).clamp(22.0, 30.0);
     let n = ((rect.h / row_h).floor() as usize).clamp(1, want);
     let max_val = entries.iter().take(n).map(|(_, v)| *v).max().unwrap_or(1).max(1);
-    let gap = 4.0;
+    let gap = 6.0;
     let bar_x = rect.x + label_width;
     let bar_max = (rect.w - label_width - value_width).max(20.0);
 

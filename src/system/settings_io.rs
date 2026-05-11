@@ -57,6 +57,7 @@ pub fn load() -> Settings {
             "lang" => s.lang = Lang::from_id(v),
             "theme" => s.theme = Theme::from_id(v),
             "layout" => s.layout = LayoutId::from_id(v),
+            "widget_visible" => s.widget_visible = parse_bool(v),
             "widget_compact" => s.widget_compact = parse_bool(v),
             "widget_snap" => s.widget_snap = parse_bool(v),
             "widget_opacity" => {
@@ -81,6 +82,7 @@ pub fn save(s: &Settings) -> std::io::Result<()> {
     writeln!(f, "lang={}", s.lang.id())?;
     writeln!(f, "theme={}", s.theme.id())?;
     writeln!(f, "layout={}", s.layout.id())?;
+    writeln!(f, "widget_visible={}", s.widget_visible)?;
     writeln!(f, "widget_compact={}", s.widget_compact)?;
     writeln!(f, "widget_snap={}", s.widget_snap)?;
     writeln!(f, "widget_opacity={}", s.widget_opacity)?;

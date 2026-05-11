@@ -53,7 +53,9 @@ pub fn draw(ctx: &RenderContext, rect: Rect, state: &AppState, _input: &mut Inpu
     // a little breathing room so trailing values don't tuck up against
     // the bar edge.
     let gap = 16.0;
-    let top_h = 420.0;
+    // Top-20 list at 22 DIPs/row needs ≈ 440 DIPs of body height plus
+    // the 22-DIP title and 32 DIPs of card inset — round up to 500.
+    let top_h = 500.0;
     let (top_row, body) = body.split_top(top_h);
     let top_row = top_row.inset(0.0, 0.0, gap, 0.0);
     let left_w = (top_row.w - gap) * (2.0 / 3.0);

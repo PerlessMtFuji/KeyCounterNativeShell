@@ -79,10 +79,11 @@ const T_ANIM: usize = 4;
 /// curve was tuned for.
 const ANIM_TICK_MS: u32 = 16;
 
-/// How long the pulse dot stays animated after the last keystroke.
-/// Slightly longer than before (700 → 900 ms) so the ease-out tail is
-/// visible without being distracting.
-pub const PULSE_GLOW_MS: i64 = 900;
+/// How long the pulse animation keeps spinning after the last keystroke.
+/// Tracks `RIPPLE_TRAIL_MS` in `live_pulse.rs` — once a ripple has
+/// finished its travel we let the timer stop so the idle CPU drops back
+/// to the snapshot cadence.
+pub const PULSE_GLOW_MS: i64 = 1500;
 
 const INITIAL_DIPS: (i32, i32) = (1100, 720);
 
@@ -346,6 +347,23 @@ impl Window {
                 log::warn!("autostart apply failed: {e}");
             }
         }
+        if let Some(visible) = out.widget_visibility_changed {
+            if let Some(wh) = crate::ui::shared::widget_hwnd() {
+                unsafe {
+                    let _ = ShowWindow(wh, if visible { SW_SHOW } else { SW_HIDE });
+                }
+                crate::ui::shared::set_widget_visible(visible);
+            }
+        }
+        if out.settings_dirty {
+            // Settings file is < 1 KB; writing it on every change keeps
+            // the user's choices safe across crashes. Failures here are
+            // non-fatal — we just log.
+            let snap = i18n::SETTINGS.read().clone();
+            if let Err(e) = crate::system::settings_io::save(&snap) {
+                log::warn!("settings_io::save failed: {e}");
+            }
+        }
     }
 
     fn confirm_and_reset(&mut self) {
@@ -564,6 +582,14 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESU
                                 if now_visible { SW_SHOW } else { SW_HIDE },
                             );
                             crate::ui::shared::set_widget_visible(now_visible);
+                            // Persist so the choice survives restart;
+                            // write immediately rather than waiting for
+                            // clean exit so a crash doesn't lose it.
+                            i18n::SETTINGS.write().widget_visible = now_visible;
+                            let snap = i18n::SETTINGS.read().clone();
+                            if let Err(e) = crate::system::settings_io::save(&snap) {
+                                log::warn!("settings_io::save failed: {e}");
+                            }
                         }
                     }
                     ID_QUIT => {

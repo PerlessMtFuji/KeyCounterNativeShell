@@ -116,6 +116,12 @@ pub fn button(
 
 /// Toggle pill — tracks an on/off boolean. Returns the new value (the
 /// caller writes it back to its state).
+///
+/// The painted track now fills the entire passed-in rect (previously
+/// capped at 20 DIPs while the hit area used the larger rect) so the
+/// click target the user sees matches the click target the controller
+/// tests against — clicking just above or below the visible pill no
+/// longer "secretly" lands inside the hit zone.
 pub fn toggle(
     ctx: &RenderContext,
     rect: Rect,
@@ -126,8 +132,8 @@ pub fn toggle(
     let clicked = input.consume_click(rect);
     let new_value = if clicked { !value } else { value };
 
-    let track_h = rect.h.min(20.0);
-    let track = Rect::new(rect.x, rect.y + (rect.h - track_h) * 0.5, rect.w, track_h);
+    let track = rect;
+    let track_h = track.h;
     let bg = if new_value {
         Brush::Accent
     } else if hovered {
@@ -137,11 +143,11 @@ pub fn toggle(
     };
     fill_rounded(ctx, track, track_h * 0.5, bg);
 
-    let knob_r = (track_h - 4.0) * 0.5;
+    let knob_r = (track_h - 6.0).max(4.0) * 0.5;
     let knob_x = if new_value {
-        track.right() - knob_r - 2.0
+        track.right() - knob_r - 3.0
     } else {
-        track.x + knob_r + 2.0
+        track.x + knob_r + 3.0
     };
     fill_circle(
         ctx,
@@ -172,8 +178,13 @@ pub fn theme_toggle(
     }
 }
 
-/// Slider for the widget opacity setting. Returns the new u8 value
-/// (0..=100). Track width is rect.w; thumb is a 12-DIP circle.
+/// Horizontal slider. Returns the new u8 value (min..=max). The track
+/// fills `rect` vertically: track stripe + thumb circle now span the
+/// full passed-in height so the click target matches what the user
+/// sees. The previous version drew a 4 DIP track and 7 DIP-radius
+/// thumb floating inside a 20 DIP-tall rect, so clicks several DIPs
+/// above or below the painted track still landed on the hit area and
+/// felt unpredictable.
 pub fn slider(
     ctx: &RenderContext,
     rect: Rect,
@@ -190,20 +201,21 @@ pub fn slider(
     // initial press landed inside the track, every frame we recompute
     // the value from the cursor position. The press-tracking state
     // belongs to the caller (we keep this control state-free) so we
-    // approximate by reacting to mouse_down + hovered. Good enough
-    // for low-precision sliders like opacity.
+    // approximate by reacting to mouse_down + hovered.
     if input.mouse_down && hovered {
         let frac = ((input.mouse_x - rect.x) / rect.w.max(1.0)).clamp(0.0, 1.0);
         new_value = (min as f32 + frac * span).round() as u8;
     }
     let clicked = input.consume_click(rect);
     if clicked && !input.mouse_down {
-        // bare click without drag — snap to clicked position
         let frac = ((input.mouse_x - rect.x) / rect.w.max(1.0)).clamp(0.0, 1.0);
         new_value = (min as f32 + frac * span).round() as u8;
     }
 
-    let track_h = 4.0;
+    // Track: a thin stripe centred vertically; thumb: as tall as the
+    // hit rect minus a 2-DIP gutter on each side so the visible target
+    // hugs the hit area.
+    let track_h = (rect.h * 0.3).clamp(4.0, 8.0);
     let track = Rect::new(
         rect.x,
         rect.y + (rect.h - track_h) * 0.5,
@@ -214,7 +226,7 @@ pub fn slider(
     let frac = (new_value - min) as f32 / span;
     let lit = Rect::new(track.x, track.y, track.w * frac, track.h);
     fill_rounded(ctx, lit, track_h * 0.5, Brush::Accent);
-    let thumb_r = 7.0;
+    let thumb_r = (rect.h * 0.5 - 2.0).clamp(7.0, 11.0);
     let thumb_x = track.x + track.w * frac;
     fill_circle(
         ctx,

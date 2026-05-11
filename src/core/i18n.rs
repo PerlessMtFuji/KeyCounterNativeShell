@@ -41,6 +41,7 @@ pub struct Settings {
     pub lang: Lang,
     pub theme: Theme,
     pub layout: LayoutId,
+    pub widget_visible: bool,
     pub widget_compact: bool,
     pub widget_snap: bool,
     pub widget_opacity: u8, // 10..=100
@@ -53,6 +54,7 @@ impl Default for Settings {
             lang: Lang::En,
             theme: Theme::Dark,
             layout: LayoutId::Qwerty,
+            widget_visible: true,
             widget_compact: false,
             widget_snap: false,
             widget_opacity: 60,
@@ -68,6 +70,7 @@ pub static SETTINGS: RwLock<Settings> = RwLock::new(Settings {
     lang: Lang::En,
     theme: Theme::Dark,
     layout: LayoutId::Qwerty,
+    widget_visible: true,
     widget_compact: false,
     widget_snap: false,
     widget_opacity: 60,
@@ -250,6 +253,9 @@ fn en(key: &str) -> Option<&'static str> {
 
         "widget.kpm" => "KPM",
         "widget.today" => "Today",
+        "widget.visibleLabel" => "Show floating widget",
+        "widget.visibleHint" =>
+            "Keep the always-on-top KPM badge on screen. Persists across launches.",
         "widget.modeLabel" => "Floating widget style",
         "widget.modeHint" =>
             "Full = card with today total. Compact = customizable pill badge.",
@@ -415,6 +421,9 @@ fn pl(key: &str) -> Option<&'static str> {
 
         "widget.kpm" => "KPM",
         "widget.today" => "Dzisiaj",
+        "widget.visibleLabel" => "Pokaż pływający widżet",
+        "widget.visibleHint" =>
+            "Trzymaj kapsułkę KPM zawsze na wierzchu. Ustawienie jest zapamiętywane.",
         "widget.modeLabel" => "Styl widżetu",
         "widget.modeHint" =>
             "Pełny = karta z dzisiejszym totalem. Kompaktowy = konfigurowalna kapsułka.",

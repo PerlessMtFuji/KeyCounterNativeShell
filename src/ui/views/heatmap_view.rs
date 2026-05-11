@@ -96,7 +96,11 @@ pub fn draw(ctx: &RenderContext, rect: Rect, state: &AppState, _input: &mut Inpu
         HAlign::Leading,
         VAlign::Top,
     );
-    let (hint_row, bars_row) = inner.split_top(18.0);
+    // Hint row needs room for the 12-DIP Caption to clear descenders
+    // before the bars start — the previous 18 DIPs left "g/j/y" tails
+    // sitting on top of the first bar.
+    let (hint_row, bars_row) = inner.split_top(26.0);
+    let bars_row = bars_row.inset(6.0, 0.0, 0.0, 0.0);
     text(
         ctx,
         hint_row,
@@ -114,15 +118,21 @@ pub fn draw(ctx: &RenderContext, rect: Rect, state: &AppState, _input: &mut Inpu
 fn draw_finger_bars(ctx: &RenderContext, rect: Rect, loads: &[i64; 10]) {
     let max = (*loads.iter().max().unwrap_or(&0)).max(1);
     let n = loads.len();
-    let label_w = 86.0;
-    let value_w = 70.0;
+    // Polish finger labels ("L środkowy", "P wskazujący") are wider than
+    // the English ones; the old 86-DIP gutter cropped the "y" off the
+    // longest entries. Bumping to 118 fits all 10 strings in both langs.
+    let label_w = 118.0;
+    let value_w = 78.0;
     let bar_x = rect.x + label_w + 6.0;
     let bar_max = (rect.w - label_w - value_w - 12.0).max(20.0);
-    let row_h = (rect.h / n as f32).clamp(18.0, 26.0);
+    // Rows were 18-26 DIPs tall; with a 14 px body face that left ≈ 2
+    // DIPs of vertical padding so the next label nudged up against the
+    // previous bar. 26-32 keeps each row breathing.
+    let row_h = (rect.h / n as f32).clamp(26.0, 32.0);
 
     for (i, value) in loads.iter().enumerate() {
         let y = rect.y + i as f32 * row_h;
-        let row = Rect::new(rect.x, y, rect.w, row_h - 4.0);
+        let row = Rect::new(rect.x, y, rect.w, row_h - 6.0);
         text(
             ctx,
             Rect::new(rect.x, y, label_w, row.h),

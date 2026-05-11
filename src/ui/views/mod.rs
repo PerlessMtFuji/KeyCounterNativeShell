@@ -44,6 +44,10 @@ pub struct ViewOutput {
     /// `system::autostart::apply` so the registry write happens
     /// immediately, not just at exit.
     pub autostart_changed: bool,
+    /// Set when the user toggled the floating-widget visibility from
+    /// inside the settings panel. Main window calls ShowWindow on the
+    /// widget HWND.
+    pub widget_visibility_changed: Option<bool>,
 }
 
 pub fn draw(
@@ -78,6 +82,7 @@ pub fn draw(
                 reset_requested: s.reset_requested,
                 export_requested: s.export_requested,
                 autostart_changed: s.autostart_changed,
+                widget_visibility_changed: s.widget_visibility_changed,
             }
         }
     }
