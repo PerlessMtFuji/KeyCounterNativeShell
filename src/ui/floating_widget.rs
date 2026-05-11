@@ -61,11 +61,11 @@ const T_REFRESH: usize = 11;
 const FULL_DIPS: (i32, i32) = (200, 96);
 const COMPACT_DIPS: (i32, i32) = (140, 44);
 
-/// Refresh cadence for the widget. The KPM display is tweened toward
-/// the actual value each tick, so a 16 ms (~60 FPS) cadence gives a
-/// smooth ramp without burning CPU when idle (the tween short-circuits
-/// once displayed == target).
-const REFRESH_INTERVAL_MS: u32 = 16;
+/// Refresh cadence for the widget tween. 50 ms (≈ 20 Hz) is enough
+/// for the integer digit to walk smoothly toward the live value — the
+/// number itself only changes a handful of times per second even at
+/// max typing speed, so faster than this just burns power.
+const REFRESH_INTERVAL_MS: u32 = 50;
 
 struct Widget {
     hwnd: HWND,
@@ -84,6 +84,13 @@ struct Widget {
     /// Wall-clock stamp of the last *target* change. Drives the
     /// per-change flash overlay on the digit.
     last_kpm_change_ms: i64,
+    /// Last integer value that actually hit the canvas. We only
+    /// invalidate when the rendered digit would differ or the dot
+    /// indicator's "fresh" band crosses a visibility threshold — the
+    /// widget is a layered window and every paint blits a translucent
+    /// surface, which the desktop compositor pays for in GPU time.
+    last_painted_kpm: i64,
+    last_painted_glow_band: u8,
 }
 
 impl Widget {
@@ -99,6 +106,8 @@ impl Widget {
             displayed_kpm: 0.0,
             target_kpm: 0,
             last_kpm_change_ms: 0,
+            last_painted_kpm: -1,
+            last_painted_glow_band: 0,
         })
     }
 
@@ -173,28 +182,40 @@ impl Widget {
         }
 
         let gap = self.target_kpm as f32 - self.displayed_kpm;
-        // 0.18 per tick at ~60 FPS gives ≈ 250 ms to cover 95 % of the
-        // gap, which feels responsive without being twitchy. Snap to
-        // the target once the remaining gap is below half a unit so we
+        // 0.45 per 50 ms tick gives ≈ 250 ms to cover 95 % of the gap,
+        // which feels responsive without being twitchy. Snap to the
+        // target once the remaining gap is below half a unit so we
         // don't paint forever (and so the trailing integer rounds to
         // the right number).
         if gap.abs() < 0.5 {
             self.displayed_kpm = self.target_kpm as f32;
         } else {
-            self.displayed_kpm += gap * 0.18;
+            self.displayed_kpm += gap * 0.45;
         }
 
-        let flash_age = now - self.last_kpm_change_ms;
-        let animating = (self.target_kpm as f32 - self.displayed_kpm).abs() > 0.05
-            || flash_age < 250
-            || (now - self.last_event_ms) < 600;
+        // Two visual signals can change per tick: the rounded integer
+        // we'd paint, and the "fresh keystroke" dot glow radius. We
+        // quantise the glow into bands (its rendered radius only walks
+        // through ~4 distinct integer pixel values across the 600 ms
+        // window) so an idle widget stops repainting instead of
+        // burning GPU on imperceptible alpha differences.
+        let painted_kpm = self.displayed_kpm.round().max(0.0) as i64;
+        let glow_band = {
+            let age = (now - self.last_event_ms).max(0);
+            if age >= 600 {
+                0
+            } else {
+                // 5 bands across the 600 ms window — about 120 ms each.
+                (5 - (age * 5 / 600).min(5) as u8).max(1)
+            }
+        };
 
-        // Skip the repaint when nothing visible changed — the tween has
-        // settled, the dot glow has decayed, and the digit snapped to
-        // the target last frame. The timer keeps ticking so we can
-        // react instantly to the next keystroke; the cost of an empty
-        // tick is one atomic load + a couple of integer compares.
-        if animating || delta > 0 {
+        let visual_changed = painted_kpm != self.last_painted_kpm
+            || glow_band != self.last_painted_glow_band;
+
+        if visual_changed {
+            self.last_painted_kpm = painted_kpm;
+            self.last_painted_glow_band = glow_band;
             unsafe {
                 let _ = InvalidateRect(self.hwnd, None, false);
             }

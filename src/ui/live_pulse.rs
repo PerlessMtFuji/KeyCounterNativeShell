@@ -24,10 +24,11 @@ pub const HEIGHT: f32 = 56.0;
 /// One ripple completes its travel from the centre dot out to MAX_R in
 /// this many ms. Two ripples are spawned half a period out of phase so
 /// the visual cadence stays continuous while the user types.
-const RIPPLE_PERIOD_MS: f32 = 1100.0;
+const RIPPLE_PERIOD_MS: f32 = 900.0;
 /// After this many ms of typing silence the ripples stop spawning. The
-/// dot itself stays visible — only the wave halts.
-const RIPPLE_TRAIL_MS: i64 = 1400;
+/// dot itself stays visible — only the wave halts. Kept short so the
+/// 30 FPS animation timer can shut down quickly between bursts.
+const RIPPLE_TRAIL_MS: i64 = 800;
 const RIPPLE_INNER_R: f32 = 7.0;
 const RIPPLE_OUTER_R: f32 = 22.0;
 

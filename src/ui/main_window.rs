@@ -69,21 +69,28 @@ const TITLE: PCWSTR = w!("KeyCounter");
 const T_PULSE: usize = 1;
 const T_LIVE: usize = 2;
 const T_FULL: usize = 3;
-/// 60 FPS animation tick. Fires for the duration of an active pulse
+/// 30 FPS animation tick. Fires for the duration of an active pulse
 /// glow only — `KillTimer` stops it once `now - last_event_ms` exceeds
 /// the glow window, so idle CPU stays at the snapshot cadence.
+///
+/// We deliberately don't run this at 60 FPS: each tick invalidates the
+/// whole window, which re-renders every dashboard card / chart /
+/// heatmap label through D2D + DirectWrite. At 60 FPS the dGPU on a
+/// typical laptop was spending ≈ 20 % redrawing a UI that only changes
+/// in one ~50-DIP corner; 30 FPS reads as smooth for the ripple and
+/// drops that to single digits.
 const T_ANIM: usize = 4;
 
-/// Animation tick spacing (ms). 16 ms ≈ 60 FPS, which is what the
-/// React/CSS version of KeyCounter ran at and what the pulse decay
-/// curve was tuned for.
-const ANIM_TICK_MS: u32 = 16;
+/// Animation tick spacing (ms). 33 ms ≈ 30 FPS — fast enough for the
+/// ripple to read as continuous motion, slow enough that the whole-
+/// window redraw cost stays modest.
+const ANIM_TICK_MS: u32 = 33;
 
 /// How long the pulse animation keeps spinning after the last keystroke.
-/// Tracks `RIPPLE_TRAIL_MS` in `live_pulse.rs` — once a ripple has
+/// Tracks the ripple trail in `live_pulse.rs` — once a ripple has
 /// finished its travel we let the timer stop so the idle CPU drops back
 /// to the snapshot cadence.
-pub const PULSE_GLOW_MS: i64 = 1500;
+pub const PULSE_GLOW_MS: i64 = 850;
 
 const INITIAL_DIPS: (i32, i32) = (1100, 720);
 
@@ -108,6 +115,10 @@ struct Window {
     /// Last value of state.live_counter from the previous tick;
     /// difference becomes the new pulse sample.
     prev_counter: i64,
+    /// Last time we paid the cost of a full-window repaint to let the
+    /// KPM number decay visibly during silence. We don't need this on
+    /// every 100 ms `tick_pulse` — once a second is plenty.
+    last_idle_paint_ms: i64,
 }
 
 impl Window {
@@ -120,6 +131,7 @@ impl Window {
             view: View::Dashboard,
             last_event_ms: 0,
             prev_counter: 0,
+            last_idle_paint_ms: 0,
         })
     }
 
@@ -148,7 +160,7 @@ impl Window {
     }
 
     /// Sync the hook counter into the pulse history. Runs every
-    /// 100 ms — the animation timer (16 ms) handles the visible glow
+    /// 100 ms — the animation timer (33 ms) handles the visible glow
     /// decay, so we don't need to repaint here unless there's actual
     /// activity to surface.
     fn tick_pulse(&mut self) {
@@ -160,17 +172,24 @@ impl Window {
             self.last_event_ms = now;
             self.state.pulse.write().record(now, delta);
             self.ensure_anim_timer();
-            unsafe {
-                let _ = InvalidateRect(self.hwnd, None, false);
-            }
+            // No InvalidateRect here — the animation timer that
+            // ensure_anim_timer just (re)installed will repaint on
+            // its own 33 ms cadence. Double-invalidating from both
+            // timers used to redraw the whole dashboard at 10 + 30
+            // Hz which the dGPU on a laptop felt distinctly.
         } else {
-            // No new keystrokes — still trim the pulse history so KPM
-            // ticks down naturally. `record(_, 0)` does the prune.
+            // No new keystrokes — trim the pulse history so KPM ticks
+            // down naturally. `record(_, 0)` does the prune.
             self.state.pulse.write().record(now, 0);
-            // Idle repaint at the 100 ms cadence so the KPM block
-            // animates down even if no new events arrive.
-            unsafe {
-                let _ = InvalidateRect(self.hwnd, None, false);
+            // Idle repaint cadence: once a second is enough for the
+            // KPM number to creep toward zero between bursts. Earlier
+            // we invalidated on every 100 ms tick which painted the
+            // whole window 10 ×/sec even when nothing was happening.
+            if now - self.last_idle_paint_ms >= 1_000 {
+                self.last_idle_paint_ms = now;
+                unsafe {
+                    let _ = InvalidateRect(self.hwnd, None, false);
+                }
             }
         }
     }
