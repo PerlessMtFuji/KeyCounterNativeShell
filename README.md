@@ -110,18 +110,28 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Performance
 
-Measured on a stock Windows 11 box, typing at ~120 KPM:
+Measured on a stock Windows 11 box. Window-hidden numbers are with the
+floating widget shown — the tray icon keeps counting even with both
+windows closed.
 
-| Metric | KeyCounter (Tauri) | KeyCounter NativeShell |
+| Scenario | CPU | GPU |
 |---|---|---|
-| RAM at idle | ~50 MB | < 10 MB |
-| RAM with window open | ~80-110 MB | < 25 MB |
-| CPU while typing | 1-3 % | < 0.2 % |
-| GPU during animations | measurable | negligible (on-demand D2D) |
-| Binary size | ~10 MB | ~3-4 MB |
-| Cold start | ~600 ms | < 100 ms |
+| Idle, window hidden (widget only) | 0.06 – 0.1 % | 0.01 – 0.05 % |
+| Typing ~160 KPM, window hidden | 0.1 – 0.2 % | 0.05 – 0.08 % |
+| Idle, window + widget visible | 0.2 – 0.6 % | 0.3 – 0.6 % |
+| Typing ~160 KPM, window + widget | 0.2 – 0.3 % | 2 – 2.5 % |
 
-The principle: at idle the app blocks in `GetMessageW` — zero polling. The hook callback is a single `fetch_add(1)`. The storage thread wakes every 3 s or after 256 events. The UI redraws only on `WM_PAINT`, which we never trigger more than 2 Hz (for the pulse animation), and only with a visible window.
+RAM is ≤ 10 MB at idle, ≤ 25 MB with the window open. Binary is ~3-4 MB.
+Cold start is < 100 ms. By comparison, the Tauri build idled at ~50 MB
+RAM and 1-3 % CPU while typing.
+
+The principle: at idle the app blocks in `GetMessageW` — zero polling.
+The hook callback is a single `fetch_add(1)`. The storage thread wakes
+every 3 s or after 256 events. The main window only repaints on
+`WM_PAINT`; during typing the 30 FPS pulse animation invalidates a
+narrow strip across the top bar so D2D only redraws that band thanks
+to `D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS`. The floating widget
+invalidates only when the rendered integer (KPM) actually changes.
 
 ## Antivirus
 

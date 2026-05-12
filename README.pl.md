@@ -110,18 +110,28 @@ Więcej w [docs/architecture.md](docs/architecture.md).
 
 ## Wydajność
 
-Mierzymy na typowym Windows 11 z aktywnym pisaniem ~120 KPM:
+Mierzone na typowym Windows 11. Wyniki ze schowanym oknem zakładają,
+że widżet jest widoczny — tray zlicza dalej nawet gdy oba okna są
+ukryte.
 
-| Metryka | KeyCounter (Tauri) | KeyCounter NativeShell |
+| Scenariusz | CPU | GPU |
 |---|---|---|
-| RAM idle | ~50 MB | < 10 MB |
-| RAM z otwartym oknem | ~80-110 MB | < 25 MB |
-| CPU przy pisaniu | 1-3 % | < 0.2 % |
-| GPU przy animacjach | mierzalne | znikome (D2D na żądanie) |
-| Rozmiar binarki | ~10 MB | ~3-4 MB |
-| Czas startu | ~600 ms | < 100 ms |
+| Idle, okno schowane (sam widżet) | 0.06 – 0.1 % | 0.01 – 0.05 % |
+| Pisanie ~160 KPM, okno schowane | 0.1 – 0.2 % | 0.05 – 0.08 % |
+| Idle, okno + widżet widoczne | 0.2 – 0.6 % | 0.3 – 0.6 % |
+| Pisanie ~160 KPM, okno + widżet | 0.2 – 0.3 % | 2 – 2.5 % |
 
-Zasada: w trybie idle aplikacja śpi w `GetMessageW` — zero pollingu. Hook callback jest pojedynczym `fetch_add(1)`. Storage wątek budzi się co 3 s lub po 256 zdarzeniach. UI rysuje tylko na `WM_PAINT`, którego sami nie wywołujemy częściej niż raz na 500 ms (dla animacji pulsu) — i tylko przy widocznym oknie.
+RAM ≤ 10 MB w idle, ≤ 25 MB z otwartym oknem. Binarka ~3-4 MB.
+Cold start < 100 ms. Dla porównania: Tauri w idle ciągnął ~50 MB RAM
+i 1-3 % CPU przy pisaniu.
+
+Zasada: w trybie idle aplikacja śpi w `GetMessageW` — zero pollingu.
+Hook callback jest pojedynczym `fetch_add(1)`. Storage wątek budzi się
+co 3 s lub po 256 zdarzeniach. Główne okno przemaluje się tylko na
+`WM_PAINT`; podczas pisania 30 FPS animacja pulsu invaliduje wąski
+pasek na górze, więc dzięki `D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS` D2D
+przemaluje tylko ten pasek. Pływający widżet invaliduje się tylko gdy
+zmieni się rysowana liczba (KPM).
 
 ## Antywirus
 
